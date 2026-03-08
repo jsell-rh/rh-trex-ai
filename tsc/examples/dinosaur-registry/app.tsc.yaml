@@ -1,0 +1,77 @@
+apiVersion: tsc/v1
+kind: Application
+
+metadata:
+  name: dinosaur-registry
+  version: 1.0.0
+  description: >
+    Red Hat Trex parity application — a dinosaur CRUD registry built entirely
+    from trusted, audited components. The AI wrote only this file.
+
+# Trusted component versions (pinned). This block is the application SBOM.
+components:
+  tsc-http:     v1.0.0
+  tsc-postgres: v1.0.0
+  tsc-auth-jwt: v1.0.0
+  tsc-grpc:     v1.0.0
+  tsc-health:   v1.0.0
+  tsc-metrics:  v1.0.0
+  tsc-events:   v1.0.0
+
+# Data resources — what the application stores and manages.
+resources:
+  - name: Dinosaur
+    plural: dinosaurs
+    fields:
+      - name: id
+        type: uuid
+        required: true
+        auto: created
+      - name: species
+        type: string
+        required: true
+        max_length: 255
+      - name: description
+        type: string
+        required: false
+      - name: created_at
+        type: timestamp
+        auto: created
+      - name: updated_at
+        type: timestamp
+        auto: updated
+      - name: deleted_at
+        type: timestamp
+        soft_delete: true
+    operations: [create, read, update, delete, list]
+    events: true
+
+# API configuration
+api:
+  rest:
+    base_path: /api/v1
+    version_header: true
+  grpc:
+    enabled: true
+    port: 9000
+
+# Authentication
+auth:
+  type: jwt
+  jwk_url: "${JWK_CERT_URL}"
+  required: true
+  allow_mock: "${OCM_MOCK_ENABLED}"
+
+# Database
+database:
+  type: postgres
+  migrations: auto
+
+# Observability
+observability:
+  health_check:
+    port: 8083
+    path: /healthz
+  metrics:
+    port: 8080
+    path: /metrics

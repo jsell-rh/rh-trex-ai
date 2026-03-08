@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12",
+  "$id": "https://github.com/openshift-online/rh-trex-ai/tsc/spec/schema.json",
+  "title": "TSC Application IR Spec",
+  "description": "Intermediate Representation for a Trusted Software Components application. AI agents write this file; the TSC compiler assembles audited components to produce a working binary.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "components"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "tsc/v1",
+      "description": "API version of this spec. Must be 'tsc/v1'."
+    },
+    "kind": {
+      "type": "string",
+      "const": "Application",
+      "description": "Resource kind. Must be 'Application'."
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Application name in kebab-case."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Application version in semver (e.g. 1.0.0)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional human-readable description."
+        }
+      }
+    },
+    "components": {
+      "type": "object",
+      "description": "SBOM: pinned versions of all trusted components used by this application. Each key is a component name; value is a semver version string.",
+      "propertyNames": {
+        "enum": [
+          "tsc-http",
+          "tsc-postgres",
+          "tsc-auth-jwt",
+          "tsc-grpc",
+          "tsc-health",
+          "tsc-metrics",
+          "tsc-events"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+        "description": "Semver version string, e.g. v1.0.0."
+      },
+      "minProperties": 1
+    },
+    "resources": {
+      "type": "array",
+      "description": "Data resources managed by this application.",
+      "items": {
+        "$ref": "#/$defs/resource"
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "base_path": {
+              "type": "string",
+              "pattern": "^/",
+              "default": "/api/v1",
+              "description": "Base URL path for the REST API."
+            },
+            "version_header": {
+              "type": "boolean",
+              "default": true,
+              "description": "Include X-API-Version header in responses."
+            }
+          }
+        },
+        "grpc": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 9000
+            }
+          }
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["jwt", "none"],
+          "description": "Authentication mechanism."
+        },
+        "jwk_url": {
+          "type": "string",
+          "description": "URL or env-var reference for JWK public key endpoint. Required when type=jwt."
+        },
+        "required": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, unauthenticated requests are rejected."
+        },
+        "allow_mock": {
+          "type": "string",
+          "description": "Env-var reference (e.g. '${OCM_MOCK_ENABLED}'). When true, accept mock tokens."
+        }
+      },
+      "if": { "properties": { "type": { "const": "jwt" } } },
+      "then": { "required": ["jwk_url"] }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["postgres"],
+          "description": "Database type. Only 'postgres' is supported."
+        },
+        "migrations": {
+          "type": "string",
+          "enum": ["auto", "manual"],
+          "default": "auto",
+          "description": "Migration strategy. 'auto' means the compiler generates SQL migration files."
+        }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "health_check": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8083
+            },
+            "path": {
+              "type": "string",
+              "default": "/healthz"
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8080
+            },
+            "path": {
+              "type": "string",
+              "default": "/metrics"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "required": ["name", "plural", "fields", "operations"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Z][a-zA-Z0-9]*$",
+          "description": "Singular resource name in PascalCase, e.g. 'Dinosaur'."
+        },
+        "plural": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Plural name in lowercase-kebab used in API paths, e.g. 'dinosaurs'."
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/field" }
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["create", "read", "update", "delete", "list"]
+          },
+          "uniqueItems": true
+        },
+        "events": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, emit PostgreSQL LISTEN/NOTIFY events on every mutation."
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Field name in snake_case."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["string", "int", "float", "bool", "timestamp", "uuid"],
+          "description": "Scalar field type."
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "max_length": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum length for string fields. Omit for unlimited."
+        },
+        "auto": {
+          "type": "string",
+          "enum": ["created", "updated"],
+          "description": "Auto-populate strategy: 'created' sets on insert; 'updated' sets on insert and update."
+        },
+        "soft_delete": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this timestamp field is the soft-delete marker. List queries exclude soft-deleted records."
+        }
+      }
+    }
+  }
+}
