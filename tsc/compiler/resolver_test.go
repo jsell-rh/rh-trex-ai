@@ -12,13 +12,13 @@ var allComponents = []struct {
 	version string
 	module  string
 }{
-	{"tsc-http", "v1.0.0", "github.com/openshift-online/tsc-components/http"},
-	{"tsc-postgres", "v1.0.0", "github.com/openshift-online/tsc-components/postgres"},
-	{"tsc-auth-jwt", "v1.0.0", "github.com/openshift-online/tsc-components/auth/jwt"},
-	{"tsc-grpc", "v1.0.0", "github.com/openshift-online/tsc-components/grpc"},
-	{"tsc-health", "v1.0.0", "github.com/openshift-online/tsc-components/health"},
-	{"tsc-metrics", "v1.0.0", "github.com/openshift-online/tsc-components/metrics"},
-	{"tsc-events", "v1.0.0", "github.com/openshift-online/tsc-components/events"},
+	{"tsc-http", "v1.0.0", "github.com/openshift-online/rh-trex-ai/tsc/components/http"},
+	{"tsc-postgres", "v1.0.0", "github.com/openshift-online/rh-trex-ai/tsc/components/postgres"},
+	{"tsc-auth-jwt", "v1.0.0", "github.com/openshift-online/rh-trex-ai/tsc/components/auth/jwt"},
+	{"tsc-grpc", "v1.0.0", "github.com/openshift-online/rh-trex-ai/tsc/components/grpc"},
+	{"tsc-health", "v1.0.0", "github.com/openshift-online/rh-trex-ai/tsc/components/health"},
+	{"tsc-metrics", "v1.0.0", "github.com/openshift-online/rh-trex-ai/tsc/components/metrics"},
+	{"tsc-events", "v1.0.0", "github.com/openshift-online/rh-trex-ai/tsc/components/events"},
 }
 
 func testdataRegistryDir(t *testing.T) string {

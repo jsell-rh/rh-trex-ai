@@ -1,4 +1,4 @@
 name: tsc-metrics
 version: v1.0.0
-module: github.com/openshift-online/tsc-components/metrics
+module: github.com/openshift-online/rh-trex-ai/tsc/components/metrics
 audit_hash: f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1

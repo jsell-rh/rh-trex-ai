@@ -25,7 +25,7 @@ func TestE2E_DinosaurRegistry(t *testing.T) {
 
 	outDir := t.TempDir()
 
-	c := compiler.New(compiler.NewStubRegistry(), "")
+	c := compiler.New(compiler.NewStubRegistry(), "", "")
 	if err := c.Compile(specPath, outDir); err != nil {
 		t.Fatalf("Compile() failed: %v", err)
 	}
