@@ -1,342 +1,210 @@
-TRex
----
+# Trusted Software Components (TSC) Platform
 
- **TRex** is RH **T**AP's **R**est **Ex**ample
+An IR-first application platform where **AI agents write declarative specs, not code**.
 
-![Trexxy](rhtap-trex_sm.png)
+Enterprises adopting AI-driven development face a fundamental trust problem: AI agents produce non-deterministic code that cannot be formally audited. TSC solves this by inverting the model — AI writes a structured Intermediate Representation (IR), and a deterministic compiler assembles working applications from pre-audited, version-pinned trusted components.
 
-
-TRex is a full-featured REST and gRPC API that persists _dinosaurs_, making it a solid foundation from which developers can quickly bootstrap new services.
-
-Some of the features included are:
-
-* Openapi generation
-* CRUD code foundation
-* Standard API guidelines, paging, etc.
-* Test driven development built-in
-* GORM and DB migrations
-* OIDC authentication
-* Responsive control plane
-* Blocking and Non-blocking locks
-* gRPC transport with server-streaming (WatchDinosaurs)
-* Event-driven architecture with PostgreSQL LISTEN/NOTIFY
-
-When looking through the code, anything talking about dinosaurs is business logic, which you
-will replace with your business logic. The rest is infrastructure that you will probably want to preserve without change.
-
-It's up to you to port future improvements to this project to your own fork. A goal of this project is to become a
-framework with an upgrade path.
-
-
-## Run for the first time
-
-Before running TRex for the first time, ensure the prerequisites are installed. For more detailed information on each prerequisite, refer to the [prerequisites](./PREREQUISITES.md) document.
-
-
-### Make a build and run postgres
-
-```sh
-
-# 1. build the project
-
-$ go install gotest.tools/gotestsum@latest
-$ make proto
-$ make binary
-
-# 2. run a postgres database locally in docker
-
-$ make db/setup
-$ make db/login
-
-    root@f076ddf94520:/# psql -h localhost -U trex rh-trex
-    psql (14.4 (Debian 14.4-1.pgdg110+1))
-    Type "help" for help.
-
-    rh-trex=# \dt
-    Did not find any relations.
+## The Core Idea
 
 ```
-
-### Run database migrations
-
-The initial migration will create the base data model as well as providing a way to add future migrations.
-
-```shell
-
-# Run migrations
-./trex migrate
-
-# Verify they ran in the database
-$ make db/login
-
-root@f076ddf94520:/# psql -h localhost -U trex rh-trex
-psql (14.4 (Debian 14.4-1.pgdg110+1))
-Type "help" for help.
-
-rh-trex=# \dt
-                 List of relations
- Schema |    Name    | Type  |        Owner
---------+------------+-------+---------------------
- public | dinosaurs  | table | trex
- public | events     | table | trex
- public | migrations | table | trex
-(3 rows)
-
-
+AI Agent
+  │
+  │  edits only this file:
+  ▼
+app.tsc.yaml          ← the IR spec (declarative, schema-validated)
+  │
+  │  tsc compile app.tsc.yaml -o ./out
+  ▼
+Compiler
+  │  resolves trusted components (audited, version-pinned)
+  │  generates minimal wiring code (main.go, go.mod, migrations/)
+  ▼
+go build ./out        ← working binary
 ```
 
-### Test the application
+The AI never touches source code. Every line of generated code comes from audited, immutable trusted components.
 
-```shell
+## Quick Start
 
-make test
-make test-integration
+### 1. Write your application spec
 
+```yaml
+# app.tsc.yaml
+apiVersion: tsc/v1
+kind: Application
+
+metadata:
+  name: my-service
+  version: 1.0.0
+
+components:
+  tsc-http:     v1.0.0
+  tsc-postgres: v1.0.0
+  tsc-auth-jwt: v1.0.0
+  tsc-health:   v1.0.0
+  tsc-metrics:  v1.0.0
+
+resources:
+  - name: Widget
+    plural: widgets
+    fields:
+      - name: id
+        type: uuid
+        required: true
+        auto: created
+      - name: name
+        type: string
+        required: true
+        max_length: 255
+      - name: created_at
+        type: timestamp
+        auto: created
+      - name: deleted_at
+        type: timestamp
+        soft_delete: true
+    operations: [create, read, update, delete, list]
+
+api:
+  rest:
+    base_path: /api/v1
+    version_header: true
+
+auth:
+  type: jwt
+  jwk_url: "${JWK_CERT_URL}"
+  required: true
+  allow_mock: "${OCM_MOCK_ENABLED}"
+
+database:
+  type: postgres
+  migrations: auto
+
+observability:
+  health_check:
+    port: 8083
+    path: /healthz
+  metrics:
+    port: 8080
+    path: /metrics
 ```
 
-### Running the Service
+### 2. Compile
 
-The REST API will be available at `http://localhost:8000` and the gRPC server at `localhost:9000`.
+```bash
+# Build the tsc compiler
+go build -o /usr/local/bin/tsc ./cmd/tsc
 
-#### Option 1: Run Without Authentication (Recommended for Local Development)
-
-For quick testing and development, you can run the service with authentication disabled:
-
-```shell
-make run-no-auth
+# Compile your spec into a runnable Go project
+tsc compile app.tsc.yaml \
+  --rh-trex-ai ~/code/scratch/rh-trex-ai \
+  -o ./my-service-out
 ```
 
-This starts the service with `--enable-authz=false --enable-jwt=false`, allowing you to test the API without tokens.
+### 3. Build and run
 
-**Test the REST API:**
+```bash
+cd my-service-out
+go build -o app .
 
-```shell
-# List all dinosaurs
-curl http://localhost:8000/api/rh-trex/v1/dinosaurs | jq
-
-# Create a new dinosaur
-curl -X POST http://localhost:8000/api/rh-trex/v1/dinosaurs \
-  -H "Content-Type: application/json" \
-  -d '{"species": "Tyrannosaurus"}' | jq
-
-# Get a specific dinosaur (replace {id} with actual ID)
-curl http://localhost:8000/api/rh-trex/v1/dinosaurs/{id} | jq
+# Run with a PostgreSQL database
+export JWK_CERT_URL=...
+export OCM_MOCK_ENABLED=true
+./app
 ```
 
-**Test the gRPC API:**
+REST API on `:8000`, health check on `:8083`, metrics on `:8080`.
 
-```shell
-# Install grpcurl if you haven't already
-go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+### 4. Add a new resource — zero code required
 
-# List available services
-grpcurl -plaintext localhost:9000 list
-
-# Create a dinosaur
-grpcurl -plaintext -d '{"species": "Velociraptor"}' \
-  localhost:9000 rh_trex.v1.DinosaurService/CreateDinosaur
-
-# List dinosaurs
-grpcurl -plaintext -d '{"page": 1, "size": 10}' \
-  localhost:9000 rh_trex.v1.DinosaurService/ListDinosaurs
-
-# Watch for real-time events (server-streaming)
-grpcurl -plaintext localhost:9000 rh_trex.v1.DinosaurService/WatchDinosaurs
+```yaml
+# Edit app.tsc.yaml — add this resource block:
+  - name: Fossil
+    plural: fossils
+    fields:
+      - name: id
+        type: uuid
+        required: true
+        auto: created
+      - name: location
+        type: string
+        required: true
+    operations: [create, read, update, delete, list]
 ```
 
-#### Option 2: Run With Authentication (Production-like)
-
-Start the service with authentication enabled:
-
-```shell
-make run
+```bash
+# Recompile — the compiler handles everything
+tsc compile app.tsc.yaml --rh-trex-ai . -o ./my-service-out
+cd my-service-out && go build -o app .
+# /api/v1/fossils endpoints now work. No code written.
 ```
 
-Authentication in the default configuration is done through the RedHat SSO. You need:
-- A Red Hat customer portal user in the right account (created as part of the onboarding doc)
-- An access token from https://console.redhat.com/openshift/token
-- The `ocm` CLI tool available at https://console.redhat.com/openshift/downloads
+## Repository Structure
 
-**Step 1: Login to your local service**
-
-```shell
-ocm login --token=${OCM_ACCESS_TOKEN} --url=http://localhost:8000
+```
+tsc/
+  spec/           IR type definitions — Component interface, Application, JSON Schema
+  components/     Trusted component library (7 components, 62 tests)
+    registry.go   Audit verification registry
+    http/         HTTP server, routing, middleware
+    postgres/     DB pool, CRUD DAOs, migrations, pg_notify
+    auth/jwt/     JWT validation, RBAC
+    grpc/         gRPC server, interceptors
+    health/       Health check server
+    metrics/      Prometheus metrics
+    events/       PostgreSQL LISTEN/NOTIFY
+  compiler/       TSC compiler: parse → resolve → generate
+  examples/
+    dinosaur-registry/
+      app.tsc.yaml  Reference application (trex parity demo)
+cmd/
+  tsc/            tsc CLI entrypoint
+TSC-ARCHITECTURE.md  Full architecture decision record
 ```
 
-**Step 2: List all Dinosaurs**
+## Testing
 
-```shell
-ocm get /api/rh-trex/v1/dinosaurs
+```bash
+go test ./tsc/...
+# ok  tsc/compiler          (37 tests)
+# ok  tsc/components        (9 tests)
+# ok  tsc/components/auth/jwt (6 tests)
+# ok  tsc/components/events (4 tests)
+# ok  tsc/components/postgres (6 tests)
 ```
 
-Response (empty if no dinosaurs exist yet):
-```json
-{
-  "items": [],
-  "kind": "DinosaurList",
-  "page": 1,
-  "size": 0,
-  "total": 0
-}
+## Trusted Component Catalog
+
+| Component | Version | Purpose | Ports |
+|-----------|---------|---------|-------|
+| `tsc-http` | v1.0.0 | HTTP server, routing, CORS middleware | :8000 |
+| `tsc-postgres` | v1.0.0 | DB pool, CRUD DAOs, auto-migrations, soft delete | — |
+| `tsc-auth-jwt` | v1.0.0 | JWT validation, RBAC middleware | — |
+| `tsc-grpc` | v1.0.0 | gRPC server, pre-auth interceptor hook | :9000 |
+| `tsc-health` | v1.0.0 | Liveness + readiness check | :8083 |
+| `tsc-metrics` | v1.0.0 | Prometheus metrics | :8080 |
+| `tsc-events` | v1.0.0 | PostgreSQL LISTEN/NOTIFY event loop | — |
+
+Each component: audited, version-pinned, immutable after audit. Bug fixes create new versions.
+
+## Why TSC?
+
+| Traditional AI-Generated Code | TSC |
+|-------------------------------|-----|
+| AI writes arbitrary code | AI writes validated IR spec |
+| No formal audit trail | Every component has audit record + hash |
+| Non-deterministic output | Same spec + versions = same binary, always |
+| Hard to SBOM | Components block IS the SBOM |
+| New resource = code review | New resource = YAML field, zero code |
+
+## IR Spec Reference
+
+Full JSON Schema: `tsc/spec/schema.json`
+
+Validate your spec:
+```bash
+tsc validate app.tsc.yaml
 ```
 
-**Step 3: Create a new Dinosaur**
+## Architecture
 
-```shell
-ocm post /api/rh-trex/v1/dinosaurs << EOF
-{
-    "species": "foo"
-}
-EOF
-```
-
-**Step 4: Get your Dinosaur**
-
-```shell
-ocm get /api/rh-trex/v1/dinosaurs
-```
-
-Response:
-```json
-{
-  "items": [
-    {
-      "created_at": "2023-10-26T08:15:54.509653Z",
-      "href": "/api/rh-trex/v1/dinosaurs/2XIENcJIi9t2eBblhWVCtWLdbDZ",
-      "id": "2XIENcJIi9t2eBblhWVCtWLdbDZ",
-      "kind": "Dinosaur",
-      "species": "foo",
-      "updated_at": "2023-10-26T08:15:54.509653Z"
-    }
-  ],
-  "kind": "DinosaurList",
-  "page": 1,
-  "size": 1,
-  "total": 1
-}
-```
-
-#### Option 3: Deploy to OpenShift Local (CRC)
-
-Use OpenShift Local (CRC) to deploy to a local OpenShift cluster.
-
-**Prerequisites:** Ensure CRC is running locally:
-
-```shell
-$ crc status
-CRC VM:          Running
-OpenShift:       Running (v4.13.12)
-RAM Usage:       7.709GB of 30.79GB
-Disk Usage:      23.75GB of 32.68GB (Inside the CRC VM)
-Cache Usage:     37.62GB
-Cache Directory: /home/mturansk/.crc/cache
-```
-
-**Deploy to CRC:**
-
-```shell
-# 1. Login to CRC
-$ make crc/login
-Logging into CRC
-Logged into "https://api.crc.testing:6443" as "kubeadmin" using existing credentials.
-
-You have access to 66 projects, the list has been suppressed. You can list all projects with 'oc projects'
-
-Using project "ocm-mturansk".
-Login Succeeded!
-
-# 2. Deploy the service
-$ make deploy
-
-# 3. Login with OCM
-$ ocm login --token=${OCM_ACCESS_TOKEN} --url=https://trex.apps-crc.testing --insecure
-
-# 4. Test the deployment
-$ ocm post /api/rh-trex/v1/dinosaurs << EOF
-{
-    "species": "foo"
-}
-EOF
-```
-
-## Run your own service
-
-To create your own service based on TRex, import it as a Go library. See [the_big_refactor.md](./the_big_refactor.md) for the full architecture of TRex as an importable library.
-
-### Make a new Kind
-
-The generator script creates a complete CRUD entity with plugin-based architecture. This automates most of the boilerplate code needed for a new resource type.
-
-**Generate a new entity:**
-```shell
-# Basic entity with no custom fields
-go run ./scripts/generator.go --kind KindName
-
-# Entity with custom fields (nullable by default)
-go run ./scripts/generator.go --kind KindName --fields "name:string,count:int,active:bool"
-
-# Entity with required (non-nullable) and optional (nullable) fields
-go run ./scripts/generator.go --kind Rocket --fields "name:string:required,fuel_type:string,max_speed:int:optional"
-```
-
-**Supported field types:**
-- `string` - Text fields
-- `int` - 32-bit integers
-- `int64` - 64-bit integers
-- `bool` - Boolean values
-- `float` - Floating-point numbers
-- `time` - Timestamp fields
-
-**Field nullability:**
-- Fields are **nullable** (pointer types) by default
-- Add `:required` to make a field non-nullable (e.g., `name:string:required`)
-- Add `:optional` to explicitly mark as nullable (e.g., `count:int:optional`)
-- Required fields appear in the OpenAPI `required` array
-
-**What the generator creates automatically:**
-- API model (`pkg/api/{kind}.go`)
-- DAO layer (`pkg/dao/{kind}.go` and `pkg/dao/mocks/{kind}.go`)
-- Service layer with event handlers (`pkg/services/{kind}.go`)
-- HTTP handlers (`pkg/handlers/{kind}.go`)
-- Presenters (`pkg/api/presenters/{kind}.go`)
-- Database migration (`pkg/db/migrations/YYYYMMDDHHMM_add_{kinds}.go`)
-- OpenAPI specification (`openapi/openapi.{kinds}.yaml`)
-- Integration tests (`test/integration/{kinds}_test.go`)
-- Test factories (`test/factories/{kinds}.go`)
-- Plugin registration (`plugins/{kinds}/plugin.go`) - auto-registers routes, controllers, and presenters
-- Automatic updates:
-  - Adds plugin import to `cmd/trex/main.go`
-  - Adds migration to `pkg/db/migrations/migration_structs.go`
-  - Updates `openapi/openapi.yaml` with new entity references
-  - Runs `make generate` to create OpenAPI client code
-
-**After generation, build and test:**
-```shell
-# 1. Build the binary
-make binary
-
-# 2. Set up the database
-make db/teardown
-make db/setup
-
-# 3. Run migrations
-./trex migrate
-
-# 4. Run the server
-make run-no-auth
-
-# 5. Test the new entity
-curl -X POST http://localhost:8000/api/rh-trex/v1/{kinds} \
-  -H "Content-Type: application/json" \
-  -d '{"species": "example"}' | jq
-
-curl http://localhost:8000/api/rh-trex/v1/{kinds} | jq
-```
-
-**Plugin Architecture Benefits:**
-- Reduction in manual steps - no need to manually edit routes, controllers, or service locators
-- Self-contained entities - all wiring for an entity lives in its plugin file
-- Auto-discovery - plugins register themselves via init() functions
-- Type-safe - compile-time checks for service access
-
-For more detailed information about the generator and plugin system, see [CLAUDE.md](./CLAUDE.md).
+See [TSC-ARCHITECTURE.md](./TSC-ARCHITECTURE.md) for full architecture decisions, component interface contracts, and the compiler design.
