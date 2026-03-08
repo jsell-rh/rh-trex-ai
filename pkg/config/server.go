@@ -14,7 +14,6 @@ type ServerConfig struct {
 	HTTPSCertFile      string        `json:"https_cert_file"`
 	HTTPSKeyFile       string        `json:"https_key_file"`
 	EnableHTTPS        bool          `json:"enable_https"`
-	EnableJWT          bool          `json:"enable_jwt"`
 	EnableAuthz        bool          `json:"enable_authz"`
 	JwkCertFile        string        `json:"jwk_cert_file"`
 	JwkCertURL         string        `json:"jwk_cert_url"`
@@ -30,7 +29,6 @@ func NewServerConfig() *ServerConfig {
 		ReadTimeout:   5 * time.Second,
 		WriteTimeout:  30 * time.Second,
 		EnableHTTPS:   false,
-		EnableJWT:     true,
 		EnableAuthz:   true,
 		JwkCertFile:   "",
 		JwkCertURL:    "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/certs", // Default to Red Hat SSO, configurable for other OIDC providers
@@ -48,10 +46,8 @@ func (s *ServerConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&s.HTTPSCertFile, "https-cert-file", s.HTTPSCertFile, "The path to the tls.crt file.")
 	fs.StringVar(&s.HTTPSKeyFile, "https-key-file", s.HTTPSKeyFile, "The path to the tls.key file.")
 	fs.BoolVar(&s.EnableHTTPS, "enable-https", s.EnableHTTPS, "Enable HTTPS rather than HTTP")
-	fs.BoolVar(&s.EnableJWT, "enable-jwt", s.EnableJWT, "Enable JWT authentication validation")
-	fs.BoolVar(&s.EnableAuthz, "enable-authz", s.EnableAuthz, "Enable Authorization on endpoints, should only be disabled for debug")
-	fs.StringVar(&s.JwkCertFile, "jwk-cert-file", s.JwkCertFile, "JWK Certificate file")
-	fs.StringVar(&s.JwkCertURL, "jwk-cert-url", s.JwkCertURL, "JWK Certificate URL")
+	// JWT authentication flags have been moved to AuthConfig
+	// Legacy fields maintained for backward compatibility but flags handled by AuthConfig
 	fs.StringVar(&s.ACLFile, "acl-file", s.ACLFile, "Access control list file")
 	fs.StringSliceVar(&s.CORSAllowedOrigins, "cors-allowed-origins", s.CORSAllowedOrigins, "Comma-separated list of CORS allowed origins")
 	fs.StringSliceVar(&s.CORSAllowedHeaders, "cors-allowed-headers", s.CORSAllowedHeaders, "Comma-separated list of additional CORS allowed headers")

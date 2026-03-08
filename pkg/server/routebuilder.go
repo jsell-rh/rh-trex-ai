@@ -23,14 +23,25 @@ func BuildDefaultRoutes(env *environments.Env, specData []byte) *mux.Router {
 
 	metadataHandler := handlers.NewMetadataHandler()
 
-	var authMiddleware auth.JWTMiddleware
-	authMiddleware = &auth.MiddlewareMock{}
-	if env.Config.Server.EnableJWT {
+	// Build authentication middleware based on configuration
+	authConfig := env.Config.GetEffectiveAuthConfig()
+	authBuilder := auth.NewAuthMiddlewareBuilder(authConfig)
+	httpAuthMiddleware, err := authBuilder.BuildHTTPMiddleware()
+	if err != nil {
+		Check(err, "Unable to create HTTP auth middleware")
+	}
+	
+	// For backward compatibility, also create JWT middleware for plugins that expect it
+	var authMiddleware environments.JWTMiddleware
+	if authConfig.EnableJWT {
 		var err error
-		authMiddleware, err = auth.NewAuthMiddleware()
+		middleware, err := auth.NewAuthMiddleware()
 		if err != nil {
-			Check(err, "Unable to create auth middleware")
+			Check(err, "Unable to create JWT middleware")
 		}
+		authMiddleware = middleware
+	} else {
+		authMiddleware = &auth.MiddlewareMock{}
 	}
 	if authMiddleware == nil {
 		Check(fmt.Errorf("auth middleware is nil"), "Unable to create auth middleware: missing middleware")
@@ -57,6 +68,12 @@ func BuildDefaultRoutes(env *environments.Env, specData []byte) *mux.Router {
 	apiV1Router.HandleFunc("/openapi", openapiHandler.GetOpenAPI).Methods(http.MethodGet)
 
 	apiV1Router.Use(MetricsMiddleware)
+	
+	// Apply authentication middleware if configured
+	if httpAuthMiddleware != nil {
+		apiV1Router.Use(httpAuthMiddleware)
+	}
+	
 	apiV1Router.Use(
 		func(next http.Handler) http.Handler {
 			return db.TransactionMiddleware(next, env.Database.SessionFactory)
