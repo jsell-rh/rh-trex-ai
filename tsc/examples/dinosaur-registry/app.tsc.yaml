@@ -1,0 +1,92 @@
+apiVersion: tsc/v1
+kind: Application
+
+metadata:
+  name: dinosaur-registry
+  description: "A registry of dinosaur species — the trex parity demo application"
+  version: 1.0.0
+
+# Trusted component bill-of-materials (pinned, audited versions)
+components:
+  tsc-http:     v1.0.0
+  tsc-postgres: v1.0.0
+  tsc-auth-jwt: v1.0.0
+  tsc-grpc:     v1.0.0
+  tsc-health:   v1.0.0
+  tsc-metrics:  v1.0.0
+  tsc-events:   v1.0.0
+
+# Data resources — what the application stores and manages
+resources:
+  - name: Dinosaur
+    plural: dinosaurs
+    description: "A dinosaur species record"
+    fields:
+      - name: species
+        type: string
+        required: true
+        max_length: 255
+        description: "Scientific species name"
+      - name: description
+        type: string
+        nullable: true
+        description: "Human-readable description"
+      - name: created_at
+        type: timestamp
+        auto: created
+      - name: updated_at
+        type: timestamp
+        auto: updated
+      - name: deleted_at
+        type: timestamp
+        soft_delete: true
+    operations: [create, read, update, delete, list]
+    events: true
+
+# API surface
+api:
+  rest:
+    base_path: /api/v1
+    bind: ":8000"
+    tls: false
+    cors:
+      allowed_origins: ["*"]
+    version_header: true
+    openapi: true
+  grpc:
+    enabled: true
+    bind: ":9000"
+    tls: false
+
+# Authentication and authorization
+auth:
+  type: jwt
+  jwk_url: "${JWK_CERT_URL}"
+  required: true
+  allow_mock: "${OCM_MOCK_ENABLED:-true}"
+  acl_file: "${ACL_FILE:-}"
+
+# Database
+database:
+  type: postgres
+  host_file:     "${DB_HOST_FILE:-secrets/db.host}"
+  name_file:     "${DB_NAME_FILE:-secrets/db.name}"
+  user_file:     "${DB_USER_FILE:-secrets/db.user}"
+  password_file: "${DB_PASSWORD_FILE:-secrets/db.password}"
+  port_file:     "${DB_PORT_FILE:-secrets/db.port}"
+  ssl_mode:      "${DB_SSLMODE:-disable}"
+  max_open_conns: 50
+  migrations: auto
+
+# Observability
+observability:
+  health_check:
+    bind: ":8083"
+  metrics:
+    bind: ":8080"
+    path: /metrics
+
+# Event system
+events:
+  type: postgres-notify
+  channel_prefix: dinosaur-registry
