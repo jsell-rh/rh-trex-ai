@@ -3,8 +3,10 @@ package compiler
 import (
 	"bytes"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -28,16 +30,54 @@ func NewGenerator(outputDir string) *Generator {
 	return &Generator{outputDir: outputDir}
 }
 
+// componentPriority defines the registration order for trusted components.
+// Lower index = registered earlier. tsc-postgres is always first because
+// other components call app.DB() during Register and depend on the DB being set.
+var componentPriority = map[string]int{
+	"tsc-postgres": 0,
+	"tsc-auth-jwt": 1,
+	"tsc-http":     2,
+	"tsc-grpc":     3,
+	"tsc-health":   4,
+	"tsc-metrics":  5,
+	"tsc-events":   6,
+}
+
+// sortComponents returns a copy of components sorted into safe registration order.
+// tsc-postgres is always first; remaining components follow their defined priority.
+// Components not listed in componentPriority are appended last, sorted by name.
+func sortComponents(components []ResolvedComponent) []ResolvedComponent {
+	sorted := make([]ResolvedComponent, len(components))
+	copy(sorted, components)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		pi, oki := componentPriority[sorted[i].Name]
+		pj, okj := componentPriority[sorted[j].Name]
+		if !oki {
+			pi = len(componentPriority)
+		}
+		if !okj {
+			pj = len(componentPriority)
+		}
+		if pi != pj {
+			return pi < pj
+		}
+		return sorted[i].Name < sorted[j].Name
+	})
+	return sorted
+}
+
 // Generate writes all output files for the given spec and resolved components.
 func (g *Generator) Generate(ir *spec.IRSpec, components []ResolvedComponent) error {
 	if err := os.MkdirAll(g.outputDir, 0755); err != nil {
 		return fmt.Errorf("creating output directory %q: %w", g.outputDir, err)
 	}
 
-	if err := g.writeMainGo(ir, components); err != nil {
+	ordered := sortComponents(components)
+
+	if err := g.writeMainGo(ir, ordered); err != nil {
 		return fmt.Errorf("generating main.go: %w", err)
 	}
-	if err := g.writeGoMod(ir, components); err != nil {
+	if err := g.writeGoMod(ir, ordered); err != nil {
 		return fmt.Errorf("generating go.mod: %w", err)
 	}
 	if err := g.writeMigrations(ir); err != nil {
@@ -153,7 +193,12 @@ func (g *Generator) writeMainGo(ir *spec.IRSpec, components []ResolvedComponent)
 		return fmt.Errorf("rendering main.go template: %w", err)
 	}
 
-	return os.WriteFile(filepath.Join(g.outputDir, "main.go"), buf.Bytes(), 0644)
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("formatting main.go (template produced invalid Go syntax): %w", err)
+	}
+
+	return os.WriteFile(filepath.Join(g.outputDir, "main.go"), formatted, 0644)
 }
 
 // --------------------------------------------------------------------------
