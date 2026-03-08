@@ -53,3 +53,4 @@ generated/
 secrets/db.password
 
 .claude/settings.local.json.worktrees/
+.worktrees/
