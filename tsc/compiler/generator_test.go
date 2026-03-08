@@ -25,7 +25,7 @@ func generateFromExample(t *testing.T) (outDir string, components []ResolvedComp
 		t.Fatalf("ResolveAll: %v", err)
 	}
 	outDir = t.TempDir()
-	if err := NewGenerator(outDir).Generate(ir, components); err != nil {
+	if err := NewGenerator(outDir, "").Generate(ir, components); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	return outDir, components
@@ -183,7 +183,7 @@ func TestGenerateMigrations_OneFilePerResource(t *testing.T) {
 		t.Fatalf("ResolveAll: %v", err)
 	}
 	outDir := t.TempDir()
-	if err := NewGenerator(outDir).Generate(ir, components); err != nil {
+	if err := NewGenerator(outDir, "").Generate(ir, components); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 

@@ -1,4 +1,4 @@
 name: tsc-auth-jwt
 version: v1.0.0
-module: github.com/openshift-online/tsc-components/auth/jwt
+module: github.com/openshift-online/rh-trex-ai/tsc/components/auth/jwt
 audit_hash: c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4

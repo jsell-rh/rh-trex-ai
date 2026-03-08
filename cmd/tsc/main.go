@@ -43,6 +43,7 @@ func compileCmd() *cobra.Command {
 		outputDir   string
 		registryDir string
 		sourceDir   string
+		rhtexAIPath string
 	)
 
 	cmd := &cobra.Command{
@@ -65,13 +66,17 @@ func compileCmd() *cobra.Command {
 				registry = compiler.NewStubRegistry()
 			}
 
-			c := compiler.New(registry, sourceDir)
+			c := compiler.New(registry, sourceDir, rhtexAIPath)
 			if err := c.Compile(specPath, outputDir); err != nil {
 				return fmt.Errorf("compilation failed: %w", err)
 			}
 
 			fmt.Printf("Compiled %q → %s\n", specPath, outputDir)
-			fmt.Println("Run: cd", outputDir, "&& go build -o app .")
+			if rhtexAIPath != "" {
+				fmt.Println("Run: cd", outputDir, "&& go build -o app .")
+			} else {
+				fmt.Println("Run: cd", outputDir, "&& go build -o app . (ensure rh-trex-ai is published or use --rh-trex-ai)")
+			}
 			return nil
 		},
 	}
@@ -79,6 +84,7 @@ func compileCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "Output directory for generated project (required)")
 	cmd.Flags().StringVar(&registryDir, "registry", "", "Path to local component registry index directory")
 	cmd.Flags().StringVar(&sourceDir, "source", "", "Path to component source directory (enables audit hash verification)")
+	cmd.Flags().StringVar(&rhtexAIPath, "rh-trex-ai", "", "Absolute path to local rh-trex-ai checkout (adds replace directive to generated go.mod)")
 
 	return cmd
 }
