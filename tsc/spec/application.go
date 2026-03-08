@@ -13,21 +13,25 @@ import (
 type Application struct {
 	mu           sync.RWMutex
 	components   []Component
-	httpHandlers []httpHandlerEntry
+	httpHandlers []HTTPHandlerEntry
 	middlewares  []HTTPMiddleware
-	grpcServices []grpcServiceEntry
+	grpcServices []GRPCServiceEntry
 	db           DB
 	resources    []ResourceDefinition
 }
 
-type httpHandlerEntry struct {
-	pattern string
-	handler HTTPHandler
+// HTTPHandlerEntry is a registered HTTP handler with its URL pattern.
+// Exported so tsc-http can retrieve and wire all registered handlers.
+type HTTPHandlerEntry struct {
+	Pattern string
+	Handler HTTPHandler
 }
 
-type grpcServiceEntry struct {
-	desc GRPCServiceDesc
-	impl any
+// GRPCServiceEntry is a registered gRPC service descriptor and implementation.
+// Exported so tsc-grpc can retrieve and register all services.
+type GRPCServiceEntry struct {
+	Desc GRPCServiceDesc
+	Impl any
 }
 
 // NewApplication constructs an empty Application with the given resource
@@ -107,7 +111,7 @@ func (a *Application) Run(ctx context.Context) error {
 func (a *Application) AddHTTPHandler(pattern string, handler HTTPHandler) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.httpHandlers = append(a.httpHandlers, httpHandlerEntry{pattern, handler})
+	a.httpHandlers = append(a.httpHandlers, HTTPHandlerEntry{Pattern: pattern, Handler: handler})
 }
 
 func (a *Application) AddMiddleware(mw HTTPMiddleware) {
@@ -119,7 +123,7 @@ func (a *Application) AddMiddleware(mw HTTPMiddleware) {
 func (a *Application) AddGRPCService(desc GRPCServiceDesc, impl any) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.grpcServices = append(a.grpcServices, grpcServiceEntry{desc, impl})
+	a.grpcServices = append(a.grpcServices, GRPCServiceEntry{Desc: desc, Impl: impl})
 }
 
 func (a *Application) SetDB(db DB) {
@@ -141,7 +145,7 @@ func (a *Application) Resources() []ResourceDefinition {
 }
 
 // HTTPHandlers returns the registered HTTP handlers (used by tsc-http).
-func (a *Application) HTTPHandlers() []httpHandlerEntry {
+func (a *Application) HTTPHandlers() []HTTPHandlerEntry {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.httpHandlers
@@ -155,7 +159,7 @@ func (a *Application) Middlewares() []HTTPMiddleware {
 }
 
 // GRPCServices returns the registered gRPC services (used by tsc-grpc).
-func (a *Application) GRPCServices() []grpcServiceEntry {
+func (a *Application) GRPCServices() []GRPCServiceEntry {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.grpcServices
