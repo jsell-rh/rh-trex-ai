@@ -50,45 +50,28 @@ resources:
 api:
   rest:
     base_path: /api/v1
-    bind: ":8000"
     version_header: true
-    cors:
-      allowed_origins: ["*"]
-    openapi: true
   grpc:
     enabled: true
-    bind: ":9000"
+    port: 9000
 
 # Authentication
 auth:
   type: jwt
   jwk_url: "${JWK_CERT_URL}"
   required: true
-  allow_mock: "${OCM_MOCK_ENABLED:-true}"
-  acl_file: "${ACL_FILE:-}"
+  allow_mock: "${OCM_MOCK_ENABLED}"
 
 # Database
 database:
   type: postgres
-  host_file:     "${DB_HOST_FILE:-secrets/db.host}"
-  name_file:     "${DB_NAME_FILE:-secrets/db.name}"
-  user_file:     "${DB_USER_FILE:-secrets/db.user}"
-  password_file: "${DB_PASSWORD_FILE:-secrets/db.password}"
-  port_file:     "${DB_PORT_FILE:-secrets/db.port}"
-  ssl_mode:      "${DB_SSLMODE:-disable}"
-  max_open_conns: 50
   migrations: auto
 
 # Observability
 observability:
   health_check:
-    bind: ":8083"
+    port: 8083
     path: /healthz
   metrics:
-    bind: ":8080"
+    port: 8080
     path: /metrics
-
-# Event system
-events:
-  type: postgres-notify
-  channel_prefix: dinosaur-registry
