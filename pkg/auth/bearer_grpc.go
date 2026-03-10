@@ -63,7 +63,7 @@ func validateBearerToken(ctx context.Context, expectedToken string) error {
 	// Extract bearer token from first authorization header
 	token := strings.TrimPrefix(authHeader[0], "Bearer ")
 	token = strings.TrimPrefix(token, "bearer ")
-	
+
 	if token == authHeader[0] { // No "Bearer " prefix found
 		return status.Error(codes.Unauthenticated, "bearer token required")
 	}

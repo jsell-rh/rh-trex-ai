@@ -30,7 +30,7 @@ func BuildDefaultRoutes(env *environments.Env, specData []byte) *mux.Router {
 	if err != nil {
 		Check(err, "Unable to create HTTP auth middleware")
 	}
-	
+
 	// For backward compatibility, also create JWT middleware for plugins that expect it
 	var authMiddleware environments.JWTMiddleware
 	if authConfig.EnableJWT {
@@ -68,12 +68,12 @@ func BuildDefaultRoutes(env *environments.Env, specData []byte) *mux.Router {
 	apiV1Router.HandleFunc("/openapi", openapiHandler.GetOpenAPI).Methods(http.MethodGet)
 
 	apiV1Router.Use(MetricsMiddleware)
-	
+
 	// Apply authentication middleware if configured
 	if httpAuthMiddleware != nil {
 		apiV1Router.Use(httpAuthMiddleware)
 	}
-	
+
 	apiV1Router.Use(
 		func(next http.Handler) http.Handler {
 			return db.TransactionMiddleware(next, env.Database.SessionFactory)

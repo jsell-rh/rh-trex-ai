@@ -97,8 +97,7 @@ func NewDefaultAPIServer(env *environments.Env, specData []byte) Server {
 
 func (s defaultAPIServer) Serve(listener net.Listener) {
 	var err error
-	
-	
+
 	// Apply TLS configuration using the new TLS framework (mirrors gRPC server pattern)
 	if s.env.Config.TLS.EnableTLS || s.env.Config.Server.EnableHTTPS {
 		// Use new TLS framework for server configuration
@@ -112,7 +111,7 @@ func (s defaultAPIServer) Serve(listener net.Listener) {
 						"Can't start HTTPS server",
 					)
 				}
-				
+
 				glog.Info("Using legacy HTTPS configuration")
 				glog.Infof("Serving with TLS (legacy) at %s", s.env.Config.Server.BindAddress)
 				err = s.httpServer.ServeTLS(listener, s.env.Config.Server.HTTPSCertFile, s.env.Config.Server.HTTPSKeyFile)
@@ -124,7 +123,7 @@ func (s defaultAPIServer) Serve(listener net.Listener) {
 		} else if tlsConfig != nil {
 			// Use enhanced TLS configuration
 			s.httpServer.TLSConfig = tlsConfig
-			glog.Infof("Using enhanced TLS configuration with minimum version %s", 
+			glog.Infof("Using enhanced TLS configuration with minimum version %s",
 				func() string {
 					switch tlsConfig.MinVersion {
 					case 0x0303: // tls.VersionTLS12
@@ -136,7 +135,7 @@ func (s defaultAPIServer) Serve(listener net.Listener) {
 					}
 				}())
 			glog.Infof("Serving with enhanced TLS at %s", s.env.Config.Server.BindAddress)
-			
+
 			// Serve with TLS configuration applied to the server
 			err = s.httpServer.ServeTLS(listener, "", "")
 		} else {

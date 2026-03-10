@@ -19,7 +19,7 @@ type EventService interface {
 	All(ctx context.Context) (api.EventList, *errors.ServiceError)
 
 	FindByIDs(ctx context.Context, ids []string) (api.EventList, *errors.ServiceError)
-	
+
 	// Sync-the-world methods for missed event recovery
 	FindUnreconciled(ctx context.Context, olderThan time.Duration) (api.EventList, *errors.ServiceError)
 	FindBySourceAndType(ctx context.Context, source string, eventType api.EventType) (api.EventList, *errors.ServiceError)

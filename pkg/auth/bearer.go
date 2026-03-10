@@ -31,7 +31,7 @@ func BearerTokenMiddleware(expectedToken string, bypassPaths []string) func(http
 			// Extract bearer token
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			token = strings.TrimPrefix(token, "bearer ")
-			
+
 			if token == authHeader { // No "Bearer " prefix found
 				http.Error(w, "Bearer token required", http.StatusUnauthorized)
 				return

@@ -5,17 +5,17 @@ package config
 func MigrateServerConfigToAuthConfig(serverConfig *ServerConfig, authConfig *AuthConfig) {
 	// Only migrate if the auth config hasn't been explicitly configured
 	// (i.e., it's still at default values)
-	
+
 	// EnableJWT migration removed - ServerConfig.EnableJWT no longer exists
-	
+
 	if serverConfig.EnableAuthz != authConfig.EnableAuthz {
 		authConfig.EnableAuthz = serverConfig.EnableAuthz
 	}
-	
+
 	if serverConfig.JwkCertURL != "" && serverConfig.JwkCertURL != authConfig.JwkCertURL {
 		authConfig.JwkCertURL = serverConfig.JwkCertURL
 	}
-	
+
 	if serverConfig.JwkCertFile != "" {
 		authConfig.JwkCertFile = serverConfig.JwkCertFile
 	}
@@ -35,9 +35,9 @@ func (c *ApplicationConfig) GetEffectiveAuthConfig() *AuthConfig {
 		BypassPaths:   c.Auth.BypassPaths,
 		BypassMethods: c.Auth.BypassMethods,
 	}
-	
+
 	// Apply migration from ServerConfig for backward compatibility
 	MigrateServerConfigToAuthConfig(c.Server, effectiveAuth)
-	
+
 	return effectiveAuth
 }

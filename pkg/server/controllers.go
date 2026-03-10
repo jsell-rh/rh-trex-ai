@@ -32,7 +32,7 @@ func (s *ControllersServer) Start() {
 			s.Broker.Publish(id)
 		}
 	})
-	
+
 	// Start sync-the-world controller for missed event recovery
 	if s.SyncController != nil {
 		s.SyncController.Start()
@@ -43,13 +43,13 @@ func (s *ControllersServer) Start() {
 func (s *ControllersServer) Stop() {
 	log := logger.NewLogger(context.Background())
 	log.Infof("Stopping controllers server")
-	
+
 	if s.SyncController != nil {
 		if err := s.SyncController.Stop(); err != nil {
 			log.Error(fmt.Sprintf("Error stopping sync controller: %v", err))
 		}
 	}
-	
+
 	if s.Broker != nil {
 		s.Broker.Close()
 	}
