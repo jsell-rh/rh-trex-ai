@@ -15,7 +15,7 @@ func SecureTLSConfig() *tls.Config {
 		// Enforce TLS 1.2 minimum (1.3 preferred, 1.2 for compatibility)
 		MinVersion: tls.VersionTLS12,
 		MaxVersion: tls.VersionTLS13,
-		
+
 		// Use only secure cipher suites (Go's defaults are good but we're explicit)
 		CipherSuites: []uint16{
 			// TLS 1.3 cipher suites (handled automatically by Go)
@@ -27,19 +27,19 @@ func SecureTLSConfig() *tls.Config {
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 		},
-		
+
 		// Prefer server cipher suite order
 		PreferServerCipherSuites: true,
-		
+
 		// Session tickets are OK with TLS 1.2+ but not configurable in this field
-		
+
 		// Use only secure curves
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,
 			tls.CurveP384,
 		},
-		
+
 		// Require certificates
 		ClientAuth: tls.NoClientCert, // Can be overridden for mTLS
 	}
@@ -58,7 +58,7 @@ func NewServerTLSConfig(certFile, keyFile string) (*tls.Config, error) {
 
 	config := SecureTLSConfig()
 	config.Certificates = []tls.Certificate{cert}
-	
+
 	return config, nil
 }
 
@@ -67,21 +67,21 @@ func NewClientTLSConfig(serverName string, caFile string, insecureSkipVerify boo
 	config := SecureTLSConfig()
 	config.ServerName = serverName
 	config.InsecureSkipVerify = insecureSkipVerify
-	
+
 	if caFile != "" {
 		caCert, err := ioutil.ReadFile(caFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CA file: %w", err)
 		}
-		
+
 		caCertPool := x509.NewCertPool()
 		if !caCertPool.AppendCertsFromPEM(caCert) {
 			return nil, fmt.Errorf("failed to parse CA certificate")
 		}
-		
+
 		config.RootCAs = caCertPool
 	}
-	
+
 	return config, nil
 }
 
@@ -91,50 +91,50 @@ func NewMutualTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if caFile != "" {
 		caCert, err := ioutil.ReadFile(caFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CA file: %w", err)
 		}
-		
+
 		caCertPool := x509.NewCertPool()
 		if !caCertPool.AppendCertsFromPEM(caCert) {
 			return nil, fmt.Errorf("failed to parse CA certificate")
 		}
-		
+
 		config.ClientCAs = caCertPool
 		config.ClientAuth = tls.RequireAndVerifyClientCert
 	}
-	
+
 	return config, nil
 }
 
 // ValidateTLSConfig performs security validation on a TLS configuration
 func ValidateTLSConfig(config *tls.Config) []string {
 	var warnings []string
-	
+
 	// Check minimum TLS version
 	if config.MinVersion < tls.VersionTLS12 {
 		warnings = append(warnings, "TLS version below 1.2 is not secure")
 	}
-	
+
 	// Check for insecure settings
 	if config.InsecureSkipVerify {
 		warnings = append(warnings, "InsecureSkipVerify=true disables certificate verification")
 	}
-	
+
 	// Check cipher suites for weak algorithms
 	for _, suite := range config.CipherSuites {
 		switch suite {
 		case tls.TLS_RSA_WITH_RC4_128_SHA,
-			 tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
-			 tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
-			 tls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA:
+			tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA:
 			warnings = append(warnings, fmt.Sprintf("Weak cipher suite detected: %x", suite))
 		}
 	}
-	
+
 	return warnings
 }
 
@@ -157,21 +157,21 @@ func GetTLSVersionString(version uint16) string {
 // PrintTLSInfo logs TLS configuration information for debugging
 func PrintTLSInfo(config *tls.Config, prefix string) []string {
 	var info []string
-	
+
 	info = append(info, fmt.Sprintf("%sMin TLS Version: %s", prefix, GetTLSVersionString(config.MinVersion)))
 	info = append(info, fmt.Sprintf("%sMax TLS Version: %s", prefix, GetTLSVersionString(config.MaxVersion)))
 	info = append(info, fmt.Sprintf("%sCipher Suites: %d configured", prefix, len(config.CipherSuites)))
 	info = append(info, fmt.Sprintf("%sClient Auth: %v", prefix, config.ClientAuth))
-	
+
 	if len(config.Certificates) > 0 {
 		info = append(info, fmt.Sprintf("%sCertificates: %d loaded", prefix, len(config.Certificates)))
 	}
-	
+
 	// Check for security warnings
 	warnings := ValidateTLSConfig(config)
 	if len(warnings) > 0 {
 		info = append(info, fmt.Sprintf("%sSecurity warnings: %s", prefix, strings.Join(warnings, ", ")))
 	}
-	
+
 	return info
 }

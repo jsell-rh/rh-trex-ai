@@ -10,25 +10,25 @@ import (
 
 const (
 	// Standard Kubernetes service account paths
-	DefaultServiceCAPath      = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-	DefaultServiceTokenPath   = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-	DefaultServiceNamespace   = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-	
+	DefaultServiceCAPath    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+	DefaultServiceTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	DefaultServiceNamespace = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 	// OpenShift service serving certificate paths
-	DefaultServingCertPath    = "/etc/serving-certs/tls.crt"
-	DefaultServingKeyPath     = "/etc/serving-certs/tls.key"
-	
+	DefaultServingCertPath = "/etc/serving-certs/tls.crt"
+	DefaultServingKeyPath  = "/etc/serving-certs/tls.key"
+
 	// OpenShift service CA bundle path
-	DefaultServiceCABundle    = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-	DefaultOpenShiftCABundle  = "/var/run/configmaps/service-ca/service-ca.crt"
+	DefaultServiceCABundle   = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+	DefaultOpenShiftCABundle = "/var/run/configmaps/service-ca/service-ca.crt"
 )
 
 // KubernetesCALoader handles loading CA certificates from Kubernetes/OpenShift
 type KubernetesCALoader struct {
-	ServiceCAPath    string
-	ServiceCABundle  string
-	OpenShiftCAPath  string
-	CustomCAPaths    []string
+	ServiceCAPath   string
+	ServiceCABundle string
+	OpenShiftCAPath string
+	CustomCAPaths   []string
 }
 
 // NewKubernetesCALoader creates a new CA loader with default paths
@@ -45,7 +45,7 @@ func (k *KubernetesCALoader) LoadServiceCA() (*x509.CertPool, error) {
 	if !k.fileExists(k.ServiceCAPath) {
 		return nil, fmt.Errorf("service CA not found at %s (not running in Kubernetes?)", k.ServiceCAPath)
 	}
-	
+
 	return k.loadCAFromFile(k.ServiceCAPath)
 }
 
@@ -58,12 +58,12 @@ func (k *KubernetesCALoader) LoadSystemCA() (*x509.CertPool, error) {
 			return pool, nil
 		}
 	}
-	
+
 	// Fall back to system CA bundle
 	if k.fileExists(k.ServiceCABundle) {
 		return k.loadCAFromFile(k.ServiceCABundle)
 	}
-	
+
 	// Use system default CA pool
 	pool, err := x509.SystemCertPool()
 	if err != nil {
@@ -80,7 +80,7 @@ func (k *KubernetesCALoader) LoadCombinedCA() (*x509.CertPool, error) {
 	if err != nil {
 		pool = x509.NewCertPool()
 	}
-	
+
 	// Add service CA if available
 	serviceCA, err := k.LoadServiceCA()
 	if err == nil {
@@ -89,7 +89,7 @@ func (k *KubernetesCALoader) LoadCombinedCA() (*x509.CertPool, error) {
 			pool.AppendCertsFromPEM(cert)
 		}
 	}
-	
+
 	// Add any custom CA files
 	for _, caPath := range k.CustomCAPaths {
 		if k.fileExists(caPath) {
@@ -101,7 +101,7 @@ func (k *KubernetesCALoader) LoadCombinedCA() (*x509.CertPool, error) {
 			}
 		}
 	}
-	
+
 	return pool, nil
 }
 
@@ -120,12 +120,12 @@ func (k *KubernetesCALoader) GetNamespace() (string, error) {
 	if !k.fileExists(DefaultServiceNamespace) {
 		return "", fmt.Errorf("namespace file not found (not running in Kubernetes?)")
 	}
-	
+
 	data, err := ioutil.ReadFile(DefaultServiceNamespace)
 	if err != nil {
 		return "", fmt.Errorf("failed to read namespace: %w", err)
 	}
-	
+
 	return string(data), nil
 }
 
@@ -134,22 +134,22 @@ func (k *KubernetesCALoader) LoadServingCertificate() (tls.Certificate, error) {
 	if !k.fileExists(DefaultServingCertPath) || !k.fileExists(DefaultServingKeyPath) {
 		return tls.Certificate{}, fmt.Errorf("serving certificate not found at %s/%s", DefaultServingCertPath, DefaultServingKeyPath)
 	}
-	
+
 	cert, err := tls.LoadX509KeyPair(DefaultServingCertPath, DefaultServingKeyPath)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("failed to load serving certificate: %w", err)
 	}
-	
+
 	return cert, nil
 }
 
 // NewKubernetesServerTLSConfig creates a server TLS config using Kubernetes/OpenShift certificates
 func NewKubernetesServerTLSConfig() (*tls.Config, error) {
 	loader := NewKubernetesCALoader()
-	
+
 	// Use secure base configuration
 	config := SecureTLSConfig()
-	
+
 	// Try to load serving certificate
 	if loader.fileExists(DefaultServingCertPath) && loader.fileExists(DefaultServingKeyPath) {
 		cert, err := loader.LoadServingCertificate()
@@ -160,32 +160,32 @@ func NewKubernetesServerTLSConfig() (*tls.Config, error) {
 	} else {
 		return nil, fmt.Errorf("no serving certificate found - ensure service has serving-certs annotation")
 	}
-	
+
 	// Load CA pool for client certificate verification if needed
 	clientCA, err := loader.LoadCombinedCA()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load CA certificates: %w", err)
 	}
 	config.ClientCAs = clientCA
-	
+
 	return config, nil
 }
 
 // NewKubernetesClientTLSConfig creates a client TLS config using Kubernetes CA
 func NewKubernetesClientTLSConfig(serverName string, enableClientCerts bool) (*tls.Config, error) {
 	loader := NewKubernetesCALoader()
-	
+
 	// Use secure base configuration
 	config := SecureTLSConfig()
 	config.ServerName = serverName
-	
+
 	// Load CA certificates
 	rootCA, err := loader.LoadCombinedCA()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load CA certificates: %w", err)
 	}
 	config.RootCAs = rootCA
-	
+
 	// Add client certificate if available and enabled
 	if enableClientCerts && loader.fileExists(DefaultServingCertPath) && loader.fileExists(DefaultServingKeyPath) {
 		clientCert, err := loader.LoadServingCertificate()
@@ -193,7 +193,7 @@ func NewKubernetesClientTLSConfig(serverName string, enableClientCerts bool) (*t
 			config.Certificates = []tls.Certificate{clientCert}
 		}
 	}
-	
+
 	return config, nil
 }
 
@@ -214,19 +214,19 @@ func (k *KubernetesCALoader) loadCAFromFile(path string) (*x509.CertPool, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA file %s: %w", path, err)
 	}
-	
+
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caCert) {
 		return nil, fmt.Errorf("failed to parse CA certificate from %s", path)
 	}
-	
+
 	return pool, nil
 }
 
 // AutoConfigureTLS automatically configures TLS based on the runtime environment
 func AutoConfigureTLS(serverName string) (*tls.Config, error) {
 	loader := NewKubernetesCALoader()
-	
+
 	if loader.IsRunningInKubernetes() {
 		// Running in Kubernetes/OpenShift - use service certificates
 		if loader.fileExists(DefaultServingCertPath) {
@@ -240,12 +240,12 @@ func AutoConfigureTLS(serverName string) (*tls.Config, error) {
 		// Running outside Kubernetes - use standard TLS
 		config := SecureTLSConfig()
 		config.ServerName = serverName
-		
+
 		// Load system CA
 		if systemCA, err := loader.LoadSystemCA(); err == nil {
 			config.RootCAs = systemCA
 		}
-		
+
 		return config, nil
 	}
 }
@@ -253,21 +253,21 @@ func AutoConfigureTLS(serverName string) (*tls.Config, error) {
 // GetTLSEnvironmentInfo returns information about the TLS environment
 func GetTLSEnvironmentInfo() map[string]interface{} {
 	loader := NewKubernetesCALoader()
-	
+
 	info := make(map[string]interface{})
 	info["running_in_kubernetes"] = loader.IsRunningInKubernetes()
 	info["running_in_openshift"] = loader.IsRunningInOpenShift()
-	
+
 	// Check for available certificates
 	info["service_ca_available"] = loader.fileExists(DefaultServiceCAPath)
 	info["serving_cert_available"] = loader.fileExists(DefaultServingCertPath)
 	info["openshift_ca_available"] = loader.fileExists(DefaultOpenShiftCABundle)
-	
+
 	// Get namespace if available
 	if namespace, err := loader.GetNamespace(); err == nil {
 		info["namespace"] = namespace
 	}
-	
+
 	// List available CA files
 	var availableCAs []string
 	caPaths := []string{
@@ -275,21 +275,21 @@ func GetTLSEnvironmentInfo() map[string]interface{} {
 		DefaultServiceCABundle,
 		DefaultOpenShiftCABundle,
 	}
-	
+
 	for _, path := range caPaths {
 		if loader.fileExists(path) {
 			availableCAs = append(availableCAs, path)
 		}
 	}
 	info["available_ca_files"] = availableCAs
-	
+
 	// Check for custom mounts
 	customPaths := []string{
 		"/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu
 		"/etc/pki/tls/certs/ca-bundle.crt",   // RHEL/CentOS
 		"/usr/local/share/ca-certificates",   // Custom CA directory
 	}
-	
+
 	var customCAs []string
 	for _, path := range customPaths {
 		if loader.fileExists(path) {
@@ -297,6 +297,6 @@ func GetTLSEnvironmentInfo() map[string]interface{} {
 		}
 	}
 	info["system_ca_files"] = customCAs
-	
+
 	return info
 }

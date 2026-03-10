@@ -18,7 +18,7 @@ type EventDao interface {
 	Delete(ctx context.Context, id string) error
 	FindByIDs(ctx context.Context, ids []string) (api.EventList, error)
 	All(ctx context.Context) (api.EventList, error)
-	
+
 	// Sync-the-world methods for missed event recovery
 	FindUnreconciled(ctx context.Context, olderThan time.Duration) (api.EventList, error)
 	FindBySourceAndType(ctx context.Context, source string, eventType api.EventType) (api.EventList, error)
@@ -100,7 +100,7 @@ func (d *sqlEventDao) FindUnreconciled(ctx context.Context, olderThan time.Durat
 	g2 := (*d.sessionFactory).New(ctx)
 	events := api.EventList{}
 	cutoff := time.Now().Add(-olderThan)
-	
+
 	// Find events where ReconciledDate is NULL and created_at is older than the cutoff
 	if err := g2.Where("reconciled_date IS NULL AND created_at < ?", cutoff).
 		Order("created_at ASC").
@@ -113,7 +113,7 @@ func (d *sqlEventDao) FindUnreconciled(ctx context.Context, olderThan time.Durat
 func (d *sqlEventDao) FindBySourceAndType(ctx context.Context, source string, eventType api.EventType) (api.EventList, error) {
 	g2 := (*d.sessionFactory).New(ctx)
 	events := api.EventList{}
-	
+
 	if err := g2.Where("source = ? AND event_type = ?", source, eventType).
 		Order("created_at ASC").
 		Find(&events).Error; err != nil {

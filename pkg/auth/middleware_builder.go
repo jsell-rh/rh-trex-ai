@@ -36,7 +36,7 @@ func NewAuthMiddlewareBuilder(authConfig *config.AuthConfig) *AuthMiddlewareBuil
 	} else {
 		strategy = AuthStrategyNone
 	}
-	
+
 	return &AuthMiddlewareBuilder{
 		authConfig: authConfig,
 		strategy:   strategy,
@@ -48,33 +48,33 @@ func (b *AuthMiddlewareBuilder) BuildHTTPMiddleware() (func(http.Handler) http.H
 	switch b.strategy {
 	case AuthStrategyNone:
 		return func(next http.Handler) http.Handler { return next }, nil
-		
+
 	case AuthStrategyJWT:
 		jwtMiddleware, err := NewAuthMiddleware()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create JWT middleware: %w", err)
 		}
 		return jwtMiddleware.AuthenticateAccountJWT, nil
-		
+
 	case AuthStrategyBearer:
 		if err := b.authConfig.Validate(); err != nil {
 			return nil, fmt.Errorf("bearer token configuration invalid: %w", err)
 		}
 		return BearerTokenMiddleware(b.authConfig.BearerToken, b.authConfig.BypassPaths), nil
-		
+
 	case AuthStrategyBoth:
 		// Create a middleware that accepts both JWT and Bearer tokens
 		if err := b.authConfig.Validate(); err != nil {
 			return nil, fmt.Errorf("bearer token configuration invalid: %w", err)
 		}
-		
+
 		jwtMiddleware, err := NewAuthMiddleware()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create JWT middleware: %w", err)
 		}
-		
+
 		return b.buildDualAuthMiddleware(jwtMiddleware, b.authConfig.BearerToken, b.authConfig.BypassPaths), nil
-		
+
 	default:
 		return nil, fmt.Errorf("unknown authentication strategy: %v", b.strategy)
 	}
@@ -85,24 +85,24 @@ func (b *AuthMiddlewareBuilder) BuildGRPCInterceptors() (grpc.UnaryServerInterce
 	switch b.strategy {
 	case AuthStrategyNone:
 		return nil, nil, nil
-		
+
 	case AuthStrategyJWT:
 		// JWT for gRPC is handled by the existing AuthUnaryInterceptor in grpc_server.go
 		return nil, nil, nil
-		
+
 	case AuthStrategyBearer:
 		if err := b.authConfig.Validate(); err != nil {
 			return nil, nil, fmt.Errorf("bearer token configuration invalid: %w", err)
 		}
 		return BearerTokenUnaryInterceptor(b.authConfig.BearerToken, b.authConfig.BypassMethods),
-			   BearerTokenStreamInterceptor(b.authConfig.BearerToken, b.authConfig.BypassMethods),
-			   nil
-			   
+			BearerTokenStreamInterceptor(b.authConfig.BearerToken, b.authConfig.BypassMethods),
+			nil
+
 	case AuthStrategyBoth:
 		// For gRPC, we currently support either JWT or Bearer, not both simultaneously
 		// This could be enhanced in the future to support dual auth
 		return nil, nil, fmt.Errorf("dual authentication (JWT + Bearer) not yet supported for gRPC")
-		
+
 	default:
 		return nil, nil, fmt.Errorf("unknown authentication strategy: %v", b.strategy)
 	}
@@ -119,13 +119,13 @@ func (b *AuthMiddlewareBuilder) buildDualAuthMiddleware(jwtMiddleware JWTMiddlew
 					return
 				}
 			}
-			
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				http.Error(w, "Authorization header required", http.StatusUnauthorized)
 				return
 			}
-			
+
 			// Try Bearer token first (simpler validation)
 			if bearerToken != "" && (len(authHeader) > 7 && (authHeader[:7] == "Bearer " || authHeader[:7] == "bearer ")) {
 				// Use bearer token middleware
@@ -133,7 +133,7 @@ func (b *AuthMiddlewareBuilder) buildDualAuthMiddleware(jwtMiddleware JWTMiddlew
 				bearerMiddleware(next).ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Fall back to JWT authentication
 			jwtMiddleware.AuthenticateAccountJWT(next).ServeHTTP(w, r)
 		})

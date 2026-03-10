@@ -44,16 +44,16 @@ func NewDefaultGRPCServer(env *environments.Env) Server {
 	// Set up authentication based on configuration
 	authConfig := env.Config.GetEffectiveAuthConfig()
 	var keyProvider *grpcutil.JWKKeyProvider
-	
+
 	if authConfig.EnableJWT {
 		keyProvider = grpcutil.NewJWKKeyProvider(authConfig.JwkCertURL, authConfig.JwkCertFile)
 	}
-	
+
 	// Auto-register bearer token interceptors if configured
 	if authConfig.EnableBearer && authConfig.BearerToken != "" {
 		bearerUnary := auth.BearerTokenUnaryInterceptor(authConfig.BearerToken, authConfig.BypassMethods)
 		bearerStream := auth.BearerTokenStreamInterceptor(authConfig.BearerToken, authConfig.BypassMethods)
-		
+
 		RegisterPreAuthGRPCUnaryInterceptor(bearerUnary)
 		RegisterPreAuthGRPCStreamInterceptor(bearerStream)
 	}
@@ -103,7 +103,7 @@ func NewDefaultGRPCServer(env *environments.Env) Server {
 		} else if tlsConfig != nil {
 			creds := credentials.NewTLS(tlsConfig)
 			opts = append(opts, grpc.Creds(creds))
-			glog.Infof("Using enhanced TLS configuration with minimum version %s", 
+			glog.Infof("Using enhanced TLS configuration with minimum version %s",
 				func() string {
 					switch tlsConfig.MinVersion {
 					case tls.VersionTLS12:

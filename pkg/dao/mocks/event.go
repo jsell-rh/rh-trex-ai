@@ -64,7 +64,7 @@ func (d *eventDaoMock) All(ctx context.Context) (api.EventList, error) {
 func (d *eventDaoMock) FindUnreconciled(ctx context.Context, olderThan time.Duration) (api.EventList, error) {
 	cutoff := time.Now().Add(-olderThan)
 	result := api.EventList{}
-	
+
 	for _, event := range d.events {
 		if event.ReconciledDate == nil && event.CreatedAt.Before(cutoff) {
 			result = append(result, event)
@@ -75,7 +75,7 @@ func (d *eventDaoMock) FindUnreconciled(ctx context.Context, olderThan time.Dura
 
 func (d *eventDaoMock) FindBySourceAndType(ctx context.Context, source string, eventType api.EventType) (api.EventList, error) {
 	result := api.EventList{}
-	
+
 	for _, event := range d.events {
 		if event.Source == source && event.EventType == eventType {
 			result = append(result, event)
