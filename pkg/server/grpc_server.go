@@ -33,6 +33,23 @@ func RegisterPreAuthGRPCStreamInterceptor(interceptor grpc.StreamServerIntercept
 	preAuthStreamInterceptors = append(preAuthStreamInterceptors, interceptor)
 }
 
+// Global interceptor registries for post-auth interceptors
+// These run after JWT authentication, so the caller's identity is available in the context.
+// Use case: authorization/RBAC middleware that needs the authenticated username to populate
+// access scopes, mirroring what HTTP post-auth middleware does for REST endpoints.
+var postAuthUnaryInterceptors []grpc.UnaryServerInterceptor
+var postAuthStreamInterceptors []grpc.StreamServerInterceptor
+
+// RegisterPostAuthGRPCUnaryInterceptor registers a unary interceptor that runs after JWT auth
+func RegisterPostAuthGRPCUnaryInterceptor(interceptor grpc.UnaryServerInterceptor) {
+	postAuthUnaryInterceptors = append(postAuthUnaryInterceptors, interceptor)
+}
+
+// RegisterPostAuthGRPCStreamInterceptor registers a stream interceptor that runs after JWT auth
+func RegisterPostAuthGRPCStreamInterceptor(interceptor grpc.StreamServerInterceptor) {
+	postAuthStreamInterceptors = append(postAuthStreamInterceptors, interceptor)
+}
+
 type grpcAPIServer struct {
 	grpcServer *grpc.Server
 	env        *environments.Env
@@ -76,6 +93,8 @@ func NewDefaultGRPCServer(env *environments.Env) Server {
 	// Add pre-auth interceptors before JWT auth
 	unaryChain = append(unaryChain, preAuthUnaryInterceptors...)
 	unaryChain = append(unaryChain, AuthUnaryInterceptor(env, keyProvider))
+	// Add post-auth interceptors after JWT auth (caller identity available in context)
+	unaryChain = append(unaryChain, postAuthUnaryInterceptors...)
 
 	streamChain := []grpc.StreamServerInterceptor{
 		RecoveryStreamInterceptor(),
@@ -85,6 +104,8 @@ func NewDefaultGRPCServer(env *environments.Env) Server {
 	// Add pre-auth interceptors before JWT auth
 	streamChain = append(streamChain, preAuthStreamInterceptors...)
 	streamChain = append(streamChain, AuthStreamInterceptor(env, keyProvider))
+	// Add post-auth interceptors after JWT auth (caller identity available in context)
+	streamChain = append(streamChain, postAuthStreamInterceptors...)
 
 	opts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryChain...),
