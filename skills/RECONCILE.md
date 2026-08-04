@@ -1,7 +1,7 @@
 # Reconciliation Checkpoint
 
 **Last Updated:** 2026-08-04
-**Last Run By:** Codex (reconcile skill — OpenAPI IR and secure pull request automation merge)
+**Last Run By:** Codex (reconcile skill — API parity and generated TUI implementation)
 
 ---
 
@@ -10,12 +10,12 @@
 | Domain | Specs | Requirements | Covered | Partial | Missing | Coverage |
 |--------|-------|-------------|---------|---------|---------|----------|
 | framework | 4 | 24 | 24 | 0 | 0 | 100% |
-| api | 2 | 20 | 16 | 3 | 1 | 80.0% |
-| data | 2 | 14 | 13 | 0 | 1 | 92.9% |
+| api | 2 | 20 | 20 | 0 | 0 | 100% |
+| data | 2 | 14 | 13 | 1 | 0 | 92.9% |
 | security | 3 | 17 | 17 | 0 | 0 | 100% |
-| codegen | 5 | 49 | 38 | 9 | 2 | 77.6% |
+| codegen | 6 | 72 | 62 | 9 | 1 | 86.1% |
 | standards | 4 | 30 | 30 | 0 | 0 | 100% |
-| **Total** | **20** | **154** | **138** | **12** | **4** | **89.6%** |
+| **Total** | **21** | **177** | **166** | **10** | **1** | **93.8%** |
 
 ## Spec Dependency Order
 
@@ -28,7 +28,7 @@ Reconciliation MUST proceed in this order to respect dependencies:
 - **Layer 4:** DA-002, SEC-001, STD-002
 - **Layer 5:** SEC-002, STD-003
 - **Layer 6:** CG-001, CG-005
-- **Layer 7:** CG-002, CG-003, CG-004
+- **Layer 7:** CG-002, CG-003, CG-004, CG-006
 
 ## Gap Table
 
@@ -38,12 +38,12 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-002 | SEC-001 | JWK Key Loading: Additive file+URL merging on HTTP | closed | critical | Fixed: `loadKeys()` restructured to load file first, then iterate all URLs additively into a combined `newKeys` map. `parseJWKSet()` → `parseAndStoreKeys()` merges into target map. Mirrors gRPC `JWKKeyProvider` architecture. |
 | GAP-003 | SEC-001 | Automatic Key Refresh: On-demand refresh from ALL sources on HTTP | closed | major | Auto-resolved by GAP-002: `validateToken()` calls `loadKeys()` which now loads from all configured sources (file + all URLs). |
 | GAP-004 | SEC-001 | Multi-Issuer Support: HTTP/gRPC behavioral consistency | closed | major | Auto-resolved by GAP-001 + GAP-002: HTTP `JWTHandler` now has architectural parity with gRPC `JWKKeyProvider` — multi-URL, additive merging, all-source refresh. |
-| GAP-005 | DA-002 | Advisory Lock for Migration Concurrency | missing | major | `pkg/db/migrations.go` invokes gormigrate directly. A `db.Migrations` advisory-lock type exists in `pkg/db/advisory_locks.go` but is not used by the migrate command. |
-| GAP-006 | API-001 | OpenAPI Specification Compliance | partial | major | Entity handlers register DELETE, but `openapi/openapi.{dinosaurs,fossils,scientists}.yaml` define only GET, POST, and PATCH. |
-| GAP-007 | API-001 | Stable Operation Identity | partial | major | All 12 documented operations now have unique IDs, but their compatibility-preserving generated names do not yet match the semantic IDs prescribed by API-001, and undocumented DELETE routes still have no operation identity. |
-| GAP-008 | API-001 | Canonical OpenAPI Completeness | partial | major | Registered DELETE routes are absent from the resolved root document, and no route-to-spec parity test exists. |
-| GAP-033 | API-001 | Automated Route-Spec Parity | missing | major | No automated test compares registered plugin application routes with the fully resolved root OpenAPI methods and normalized paths. |
-| GAP-009 | CG-001 | Generated Operation Identity | missing | minor | `templates/generate-openapi.txt` does not emit `operationId` or generated DELETE documentation. |
+| GAP-005 | DA-002 | Advisory Lock for Migration Concurrency | partial | major | A reusable `db.Migrations` advisory-lock type exists in `pkg/db/advisory_locks.go`, but `pkg/db/migrations.go` still invokes gormigrate without using it. |
+| GAP-006 | API-001 | OpenAPI Specification Compliance | closed | major | All registered dinosaur, fossil, and scientist CRUD methods, including DELETE, are documented in the split OpenAPI files and generated clients. |
+| GAP-007 | API-001 | Stable Operation Identity | closed | major | The resolved root document has 15 unique semantic IDs (`list`, `create`, `get`, `update`, and `delete` for each entity), and all generated consumers compile against the migration. |
+| GAP-008 | API-001 | Canonical OpenAPI Completeness | closed | major | The fully resolved root document matches every registered application route and method; generated embedded and Go-client specifications were regenerated from it. |
+| GAP-033 | API-001 | Automated Route-Spec Parity | closed | major | `cmd/trex/route_openapi_parity_test.go` resolves split path-item references and compares normalized method/path sets against the discovered Gorilla router. |
+| GAP-009 | CG-001 | Generated Operation Identity | closed | minor | Both entity OpenAPI templates emit semantic IDs and complete DELETE contracts; `entity_openapi_template_test.go` renders and resolves a synthetic entity to assert all five operations. |
 | GAP-010 | CG-002 | OpenAPI-Driven Generation | partial | minor | The CLI discovers root schemas and assumes resources. It renders list/get/create commands only, rather than projecting exactly the operations present in OpenAPI. |
 | GAP-011 | CG-002 | Shared IR Consumption | closed | minor | The CLI imports `scripts/openapi-ir`, projects resource views from the normalized document, and contains no raw YAML parser. |
 | GAP-012 | CG-002 | Scoped Path Fidelity | missing | minor | CLI resources retain one `PathSegment`; nested scope parameters and exact route templates are discarded. |
@@ -57,14 +57,14 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-018 | CG-004 | Shared IR Consumption | closed | minor | Console resources are projected from canonical IR resource views and schemas; the generator no longer parses raw YAML. |
 | GAP-019 | CG-004 | Scoped View and Action Fidelity | partial | minor | Patch/delete flags are detected for flat resources, but parent scopes, general actions, streams, and exact operation routes are not modeled. |
 | GAP-045 | CG-004 | Generated Console Acceptance Tests | partial | minor | The pinned lock graph is installed and the generated production plugin builds; scoped components, unsupported actions, and exact authenticated requests still lack runtime assertions. |
-| GAP-020 | CG-005 | Canonical OpenAPI Front End | closed | minor | `scripts/openapi-ir` is the shared normalized front end consumed by CLI, SDK, and console modules. |
+| GAP-020 | CG-005 | Canonical OpenAPI Front End | closed | minor | `scripts/openapi-ir` is the shared normalized front end consumed by CLI, SDK, console, and TUI modules. |
 | GAP-021 | CG-005 | Reference Resolution | closed | minor | The loader resolves split local references, preserves recursive schema identity, and diagnoses unresolved and cyclic non-schema references. |
 | GAP-022 | CG-005 | Operation Identity | closed | minor | The IR rejects missing and duplicate IDs with source diagnostics; all current documented operations declare unique IDs. |
 | GAP-023 | CG-005 | Operation Fidelity | closed | minor | Operations retain ordered routes, all input locations, serialization, request/response content, metadata, servers, and inherit/none/override security states. |
 | GAP-024 | CG-005 | Schema Fidelity | closed | minor | Canonical schema nodes retain composition, constraints, access modes, nullability, discriminator data, defaults, examples, and reference identity. |
 | GAP-025 | CG-005 | Usage-Based Schema Roles | closed | minor | Request, response, list-item, error, parameter, and event roles are derived from operation usage rather than names. |
 | GAP-026 | CG-005 | Resource View Graph | closed | minor | Multi-scope collection/item views are distinct graph nodes and may share schema identities. |
-| GAP-027 | CG-005 | Relationship Semantics | closed | minor | Link Objects and conservative inferred containment retain target mappings and explicit/inferred provenance. |
+| GAP-027 | CG-005 | Relationship Semantics | closed | minor | Link Objects and conservative inferred containment retain endpoints, full standard runtime-expression mappings, and explicit/inferred provenance; ambiguous inference remains disconnected. |
 | GAP-028 | CG-005 | Operation-Derived Capabilities | closed | minor | Canonical capabilities represent only actual CRUD, action, and streaming operations. |
 | GAP-029 | CG-005 | Extension Preservation | closed | minor | Document, path, operation, parameter, schema, and property extensions retain values and source locations. |
 | GAP-030 | CG-005 | Deterministic Normalization | closed | minor | Repeated normalization and all target generation are byte-stable in tests. |
@@ -72,13 +72,36 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-032 | CG-005 | Loader Conformance Fixtures | closed | minor | Tracked fixtures cover single/split documents, recursion, unresolved references, invalid cycles, and root-boundary rejection. |
 | GAP-034 | CG-005 | Bounded Reference Resolution | closed | minor | References are canonicalized and constrained by allowed roots, including symlink, traversal, absolute-path, and URI checks. |
 | GAP-035 | CG-005 | Safe Target Projection | closed | minor | Shared identifier/path validation, safe joins, target escaping, and adversarial projection tests prevent output-root and interpolation escapes. |
-| GAP-036 | CG-005 | Atomic Contract Evolution | closed | minor | `make test-generators` compiles and tests the IR and all three nested consumer modules; unit CI invokes that target. |
+| GAP-036 | CG-005 | Atomic Contract Evolution | closed | minor | `make test-generators` compiles and tests the IR and all four nested consumer modules; unit CI invokes that target. |
 | GAP-041 | CG-005 | Pre-Migration Characterization Gate | closed | minor | Repository and shared-fixture characterization tests plus ignored pre-implementation SHA manifests prove legacy-compatible outcomes across parser migration. |
-| GAP-042 | CG-005 | Repository OpenAPI Generation Gate | closed | minor | Every consumer generates the real split-file repository spec into temporary roots and runs target acceptance without a database or API service. |
+| GAP-042 | CG-005 | Repository OpenAPI Generation Gate | closed | minor | CLI, SDK, console, and TUI consumers generate the real split-file repository spec into temporary roots and run target acceptance without a database or API service. |
 | GAP-037 | CG-005 | Operation and Security Conformance Fixtures | closed | minor | Fixtures assert flat/scoped operations, actions, streams, serialization, and inherited/none/override security. |
 | GAP-038 | CG-005 | Schema and Role Conformance Fixtures | closed | minor | Fixtures assert recursive/composed schema semantics and all required usage roles without helper-resource promotion. |
 | GAP-039 | CG-005 | Resource View and Metadata Conformance Fixtures | closed | minor | Fixtures assert multi-scope views, explicit and inferred relationships, ambiguity handling, parameter mappings, and extensions. |
-| GAP-040 | CG-005 | Consumer Fixture Conformance | closed | minor | CLI, SDK, and console suites consume the shared fixture through the canonical IR and assert target projections. |
+| GAP-040 | CG-005 | Consumer Fixture Conformance | closed | minor | All four consumer suites load the shared fixture through the canonical IR; the TUI asserts supported operations, paths, relationships, security, and its required diagnostic for the fixture's unsupported OAuth operations. |
+| GAP-055 | CG-006 | Canonical IR Consumption | closed | minor | `scripts/tui-generator` loads only `scripts/openapi-ir` and projects its normalized document; no independent YAML traversal exists. |
+| GAP-056 | CG-006 | Descriptor-Driven Generic Runtime | closed | minor | OpenAPI resources project to stable descriptors consumed by one resource-agnostic Bubble Tea model with no entity-specific tables or clients. |
+| GAP-057 | CG-006 | Standalone Generated Module | closed | minor | Generation emits a separately buildable Go module with pinned dependencies, embedded descriptors, runtime sources, tests, and a dedicated command. |
+| GAP-058 | CG-006 | Resource View Graph Projection | closed | minor | Descriptors retain global/scoped views, explicit and inferred edge provenance, explicit precedence, and diagnostics for ambiguous disconnected views. |
+| GAP-059 | CG-006 | Multi-Parent Views and Navigation Stack | closed | minor | Runtime frames preserve the actual incoming edge, selected identity, bindings, and parent-specific selection across push/pop navigation. |
+| GAP-060 | CG-006 | Deterministic Path-Parameter Binding | closed | major | Link mappings support the complete OpenAPI runtime-expression grammar; inherited and selected-row bindings are deterministic, location-aware, and reject missing or ambiguous values before HTTP. |
+| GAP-061 | CG-006 | Typed Resource Presentation Extension | closed | minor | The `x-trex-tui` grammar validates labels, aliases, identities, sort fields, columns, priorities, scalar readability, and terminal safety with source diagnostics. |
+| GAP-062 | CG-006 | Deterministic Presentation Defaults | closed | minor | Metadata-free resources derive stable labels, identity, readable columns, priority order, and sorting from normalized schemas. |
+| GAP-063 | CG-006 | Reserved Operation Presentation Metadata | closed | minor | Unsupported reserved operation fields are rejected explicitly, preventing accidental semantics before their grammar is specified. |
+| GAP-064 | CG-006 | Resource Switching, Tables, Filtering, and Detail | closed | minor | The generic runtime provides aliases, resource switching, filtering, responsive tables, detail views, relationship choice, breadcrumbs, and Enter/Esc navigation. |
+| GAP-065 | CG-006 | Capability-Driven Operations | closed | major | Only normalized documented operations become controls; generic prompts collect typed path/query/header values and JSON bodies for actions and streams. |
+| GAP-066 | CG-006 | Exact HTTP Request Construction | closed | major | Request tests cover path/query/header collisions, simple/label/matrix styles, form/deep-object serialization, `allowReserved`, JSON validation, status ranges, and no-request failures. |
+| GAP-067 | CG-006 | Operation Security and Credential Safety | closed | major | Inherit/none/override and optional anonymous alternatives are preserved; unsupported required schemes fail, tokens use files, and credentials cannot cross origins without explicit trust. |
+| GAP-068 | CG-006 | Terminal-Safe Rendering | closed | critical | Tables, details, breadcrumbs, errors, streams, labels, and statuses pass through idempotent sanitizers covering CSI, OSC, DCS, string controls, C0/C1, DEL, layout controls, and framework markup. |
+| GAP-069 | CG-006 | Actionable Projection Diagnostics | closed | minor | Projection aggregates safe failures with file, JSON Pointer, operation/view, and field context before installing any output. |
+| GAP-070 | CG-006 | Repository Generation Workflow | closed | major | `generate-tui`, `generate-all`, and `test-generators` are wired; atomic staging uses exact ownership markers and refuses unowned or symbolic-link outputs. |
+| GAP-071 | CG-006 | Graph Conformance Gate | closed | minor | TUI fixtures assert flat/global and multiply scoped views, two explicit parents, explicit-over-inferred precedence, collection-item inference, and ambiguous disconnection. |
+| GAP-072 | CG-006 | Parameter-Binding and Request Gate | closed | major | `httptest` cases exercise standard Link expressions, inherited frames, selected rows, multi-scope routes, styles, collisions, validation, exact bodies/headers/auth, and failure without a request. |
+| GAP-073 | CG-006 | Capability Conformance Gate | closed | minor | A list/update/stream-only fixture and runtime chooser assertions prove documented partial capabilities are retained without inventing create/get/delete controls. |
+| GAP-074 | CG-006 | Runtime Navigation Gate | closed | minor | `teatest` drives aliases, filtering, details, relationship choice, multi-parent push/pop, breadcrumbs, selection restoration, and inline errors against `httptest`. |
+| GAP-075 | CG-006 | Terminal Injection Gate | closed | critical | Unit and `teatest` suites inject all specified terminal-control classes through table, detail, breadcrumb, error, and stream contexts and assert safe, idempotent output. |
+| GAP-076 | CG-006 | Deterministic Generation Gate | closed | minor | Two isolated generations compare relative paths, modes, and SHA-256 digests, reject host paths/timestamps, and build/test both standalone modules. |
+| GAP-077 | CG-006 | Repository OpenAPI Acceptance Gate | closed | minor | The real split repository specification generates all 15 CRUD operations into a temporary TUI module that passes tidy, test, and build under `make test-generators`. |
 | GAP-046 | STD-004 | Exact Dependency Declarations | closed | major | Node acceptance and generated container images use exact tag+digest references; npm, TypeScript, and gotestsum versions are exact. |
 | GAP-047 | STD-004 | Locked JavaScript Dependency Graph | closed | major | Console output includes a complete npm v3 lockfile and both acceptance and generated Docker builds use `npm ci --ignore-scripts`. |
 | GAP-048 | STD-004 | Minimum Dependency Age | closed | major | The live checker admits only Go and npm versions at least 14 days old, including transitive lock entries and standalone tools. |
@@ -93,14 +116,12 @@ Reconciliation MUST proceed in this order to respect dependencies:
 
 Recommended implementation order for the remaining gaps:
 
-1. **API and entity-generator parity:** GAP-006–009 and GAP-033 — document DELETE, emit semantic operation IDs from the entity generator, and enforce route/spec parity.
-2. **CLI operation fidelity:** GAP-010, GAP-012, and GAP-043 — project arbitrary capabilities and scopes and exercise exact requests against a mock server.
-3. **SDK operation/schema fidelity:** GAP-013, GAP-015, GAP-016, and GAP-044 — render arbitrary scoped/action/stream operations and behavior-test all languages.
-4. **Console view fidelity:** GAP-017, GAP-019, and GAP-045 — project scoped views/actions and component-test supported and absent capabilities.
-5. **TUI specification and implementation:** author CG-006, then consume the now-covered canonical IR and conformance fixtures.
-6. **Independent data gap:** GAP-005 — add migration advisory locking outside the codegen workstream.
+1. **CLI operation fidelity:** GAP-010, GAP-012, and GAP-043 — project arbitrary capabilities and scopes and exercise exact requests against a mock server.
+2. **SDK operation/schema fidelity:** GAP-013, GAP-015, GAP-016, and GAP-044 — render arbitrary scoped/action/stream operations and behavior-test all languages.
+3. **Console view fidelity:** GAP-017, GAP-019, and GAP-045 — project scoped views/actions and component-test supported and absent capabilities.
+4. **Independent data gap:** GAP-005 — connect the existing advisory-lock abstraction to migration execution.
 
-CG-005, STD-003, and STD-004 are fully covered. GAP-001–004 and GAP-052–054 remain closed and require no further action.
+API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. GAP-001–004, GAP-006–009, GAP-020–042, GAP-052–077 remain closed and require no further action.
 
 ## Reconciliation History
 
@@ -119,3 +140,4 @@ CG-005, STD-003, and STD-004 are fully covered. GAP-001–004 and GAP-052–054 
 | 2026-08-04 | 97.2% (105/108) | Added secure pull request execution, privilege-separated commenting, and workflow trust-boundary verification requirements; identified three implementation gaps. | Codex |
 | 2026-08-04 | 100% (108/108) | Closed the three STD-003 workflow gaps with read-only PR CI, an API-only trusted commenter, immutable action pins, and offline trust-boundary mutation tests. | Codex |
 | 2026-08-04 | 89.6% (138/154) | Merged the OpenAPI IR and secure pull request automation requirement sets, renumbered the CI gaps to preserve unique identifiers, and retained both implementations. | Codex |
+| 2026-08-04 | 93.8% (166/177) | Closed API/entity-generator parity and all 23 CG-006 requirements with a canonical-IR TUI graph, descriptor-driven runtime, exact HTTP/auth and Link semantics, safe atomic output, deterministic generation, and real-spec acceptance. Reclassified the existing-but-unused migration lock as partial. | Codex |

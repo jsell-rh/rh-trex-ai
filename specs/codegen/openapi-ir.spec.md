@@ -4,7 +4,7 @@
 **Status:** Active
 **ID:** CG-005
 **Related:** [REST Conventions](../api/rest-conventions.spec.md), [Testing Standards](../standards/testing.spec.md), [Dependency Supply Chain](../standards/dependency-supply-chain.spec.md), [CLI Generator](cli-generator.spec.md), [SDK Generator](sdk-generator.spec.md), [Console Plugin Generator](console-plugin-generator.spec.md), [TUI Generator](tui-generator.spec.md)
-**Implements:** `scripts/openapi-ir/`, `scripts/sdk-generator/parser.go`, `scripts/cli-generator/main.go`, `scripts/console-plugin-generator/main.go`
+**Implements:** `scripts/openapi-ir/`
 
 ---
 
@@ -37,7 +37,7 @@ Target generators MAY define additional presentation models, but those models ar
 TRex generators SHALL obtain OpenAPI semantics through one shared loader and normalized IR. A generator MAY add target-specific projections after normalization, but SHALL NOT independently traverse raw OpenAPI YAML to rediscover operations, schemas, or relationships.
 
 #### Scenario: Multiple consumers use one interpretation
-- GIVEN the CLI, SDK, and console generators receive the same OpenAPI document
+- GIVEN the CLI, SDK, console, and TUI generators receive the same OpenAPI document
 - WHEN each generator prepares its target-specific model
 - THEN each SHALL consume the shared normalized IR
 - AND operation, schema, and relationship discovery SHALL have identical semantics across the generators
@@ -227,7 +227,7 @@ Continuous integration SHALL run every IR-consuming generator against the reposi
 #### Scenario: Real specification smoke test
 - GIVEN the repository root OpenAPI document and all referenced entity documents
 - WHEN the generator test job runs
-- THEN CLI, SDK, and console artifacts SHALL be generated in temporary directories
+- THEN CLI, SDK, console, and TUI artifacts SHALL be generated in temporary directories
 - AND each artifact SHALL pass its target-specific build, type-check, and behavioral acceptance checks
 - AND the test SHALL leave the working tree unchanged
 
@@ -313,4 +313,4 @@ Every generator that consumes the canonical IR SHALL run target tests from share
 | Internal contract changes are atomic | The IR need not provide public version compatibility, but every separately built consumer must move and be tested together |
 | Characterize behavior, not implementation | Black-box assertions survive parser replacement without freezing private data structures, formatting, or known defects |
 | Real and synthetic inputs are complementary | Fixtures isolate semantics while the repository OpenAPI document proves integration with the API that TRex actually ships |
-| Normalize once, project many times | Shared semantics prevent the CLI, SDK, console, and future TUI from disagreeing about the API |
+| Normalize once, project many times | Shared semantics prevent the CLI, SDK, console, and TUI from disagreeing about the API |
