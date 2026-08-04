@@ -67,19 +67,19 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForText(t, testModel, "Alpha")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "description: Parent restored red", "Parents > Parent[parent/7]")
+	waitForTexts(t, testModel, "description: Parent restored red", "<parents>", "<parent[parent/7]>")
 
 	// The item has two outgoing relationships, so Enter must open a stable chooser.
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForTexts(t, testModel, "RELATIONSHIP", "Children", "Public Children")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "Scoped Kid", "Parents > Parent[parent/7] > Children[parent/7]")
+	waitForTexts(t, testModel, "Scoped Kid", "<parents>", "<parent[parent/7]>", "<children[parent/7]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "description: Child detail", "Child[child/1]")
+	waitForTexts(t, testModel, "description: Child detail", "<child[child/1]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForText(t, testModel, "Scoped Kid")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	waitForTexts(t, testModel, "description: Parent restored red", "Parents > Parent[parent/7]")
+	waitForTexts(t, testModel, "description: Parent restored red", "<parents>", "<parent[parent/7]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForText(t, testModel, "Other")
 
@@ -89,11 +89,11 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Account Nine")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "description: Account restored", "Accounts > Account[account-9]")
+	waitForTexts(t, testModel, "description: Account restored", "<accounts>", "<account[account-9]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "Account Kid", "Accounts > Account[account-9] > Children[account-9]")
+	waitForTexts(t, testModel, "Account Kid", "<accounts>", "<account[account-9]>", "<children[account-9]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	waitForTexts(t, testModel, "description: Account restored", "Accounts > Account[account-9]")
+	waitForTexts(t, testModel, "description: Account restored", "<accounts>", "<account[account-9]>")
 
 	if err := testModel.Quit(); err != nil {
 		t.Fatal(err)
@@ -209,13 +209,13 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(110, 30))
 	t.Cleanup(func() { _ = testModel.Quit() })
-	waitForText(t, testModel, "Loaded 0 items")
+	waitForText(t, testModel, "Things(all)[0]")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	waitForTexts(t, testModel, "archiveThing", "POST · 4 input(s)")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "path parameter thing_id (string) — required")
+	waitForText(t, testModel, "thing_id  string · required")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "path parameter thing_id is required")
+	waitForText(t, testModel, "thing_id is required")
 	select {
 	case request := <-actionRequests:
 		t.Fatalf("empty required input made request %q", request)
@@ -223,14 +223,14 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 	}
 	testModel.Type("thing/7")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "query parameter thing_id (string) — optional")
-	testModel.Type("notify")
-	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "header parameter X-Reason (string) — required")
+	waitForText(t, testModel, "X-Reason  string · required")
 	testModel.Type("operator requested")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "body field name (string) — required")
+	waitForText(t, testModel, "name  string · required")
 	testModel.Type("updated")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "thing_id  string · optional")
+	testModel.Type("notify")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Operation completed")
 	select {
@@ -240,6 +240,65 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("action request was not received")
+	}
+}
+
+func TestRoutineReadsRemainSilentAndPostActionRefreshPreservesSuccess(t *testing.T) {
+	descriptor := Descriptor{
+		Title: "Silent reads", Servers: []Server{{URL: "http://localhost:9001"}},
+		Views: []View{
+			{ID: "things", Kind: "collection", Label: "Things", OperationIDs: []string{"listThings", "archiveThing"}, ListOperationID: "listThings"},
+			{ID: "thing", Kind: "item", Label: "Thing", OperationIDs: []string{"getThing"}, GetOperationID: "getThing"},
+		},
+		Operations: []Operation{
+			{ID: "listThings", Method: http.MethodGet, Capabilities: []string{"list"}, Response: ResponseShape{ItemsPointer: "/items"}, Security: EffectiveSecurity{None: true}},
+			{ID: "getThing", Method: http.MethodGet, Capabilities: []string{"get"}, Security: EffectiveSecurity{None: true}},
+			{ID: "archiveThing", Method: http.MethodPost, Capabilities: []string{"action"}, Security: EffectiveSecurity{None: true}},
+		},
+	}
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: "http://localhost:9001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frameID := model.frames[0].ID
+	listResult := operationResultMsg{
+		viewID: "things", frameID: frameID, operationID: "listThings",
+		result: Result{Status: http.StatusOK, Body: map[string]any{"items": []any{map[string]any{"id": "thing-1"}}}},
+	}
+	_, _ = model.handleResult(listResult)
+	if alert, present := model.shell.Alerts.Active(); present {
+		t.Fatalf("initial list created alert %#v", alert)
+	}
+
+	model.frames[0].TargetViewID = "thing"
+	_, _ = model.handleResult(operationResultMsg{
+		viewID: "thing", frameID: frameID, operationID: "getThing",
+		result: Result{Status: http.StatusOK, Body: map[string]any{"id": "thing-1"}},
+	})
+	if alert, present := model.shell.Alerts.Active(); present {
+		t.Fatalf("detail read created alert %#v", alert)
+	}
+
+	model.frames[0].TargetViewID = "things"
+	listResult.background = true
+	_, _ = model.handleResult(listResult)
+	if alert, present := model.shell.Alerts.Active(); present {
+		t.Fatalf("background refresh created alert %#v", alert)
+	}
+
+	_, _ = model.handleResult(operationResultMsg{
+		viewID: "things", frameID: frameID, operationID: "archiveThing",
+		result: Result{Status: http.StatusAccepted},
+	})
+	alert, present := model.shell.Alerts.Active()
+	if !present || alert.Severity != AlertSuccess || alert.Summary != "Operation completed" {
+		t.Fatalf("action success alert = %#v, present %v", alert, present)
+	}
+	listResult.background = false
+	_, _ = model.handleResult(listResult)
+	alert, present = model.shell.Alerts.Active()
+	if !present || alert.Summary != "Operation completed" || strings.Contains(alert.Summary, "Loaded") {
+		t.Fatalf("post-action refresh replaced success alert = %#v, present %v", alert, present)
 	}
 }
 
@@ -327,7 +386,7 @@ func TestBreadcrumbSanitizesAPIDerivedIdentityWithTeatest(t *testing.T) {
 	t.Cleanup(func() { _ = testModel.Quit() })
 	waitForText(t, testModel, "Safe")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "Safe detail", "Items > Item[one]")
+	waitForTexts(t, testModel, "Safe detail", "<items>", "<item[one]>")
 	output := readOutput(t, testModel.Output())
 	if bytes.Contains(output, []byte("breadcrumb-owned")) || bytes.Contains(output, []byte("\x1b]52")) {
 		t.Fatalf("unsafe breadcrumb identity reached output: %q", output)

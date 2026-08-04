@@ -90,7 +90,6 @@ type Model struct {
 	form             *FormDialog
 	confirmation     *ConfirmationDialog
 	actionInFlight   bool
-	postAction       bool
 	shell            Shell
 	refreshInterval  time.Duration
 	nextRefresh      time.Time
@@ -998,7 +997,6 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 		model.shell.Modal.Close()
 		model.shell.Alerts.Clear("request:" + message.operationID)
 		model.alertSuccess("action", "Operation completed")
-		model.postAction = true
 		return model, model.loadCurrent()
 	}
 	if containsString(operation.Capabilities, "list") && !operation.Response.Stream {
@@ -1010,12 +1008,6 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 		model.setRows(*view, items)
 		model.markReadSuccess(frame)
 		model.shell.Alerts.Clear("request:" + message.operationID)
-		message := fmt.Sprintf("Loaded %d items", len(items))
-		if model.postAction {
-			message = fmt.Sprintf("Operation completed; refreshed %d items", len(items))
-			model.postAction = false
-		}
-		model.alertSuccess("load", message)
 		return model, nil
 	}
 	if object, ok := message.result.Body.(map[string]any); ok {
@@ -1025,7 +1017,6 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 		model.mode = modeDetail
 		model.markReadSuccess(frame)
 		model.shell.Alerts.Clear("request:" + message.operationID)
-		model.alertSuccess("load", "Loaded "+view.Label)
 		return model, nil
 	}
 	model.markReadFailure(frame, message, fmt.Errorf("operation %s returned no displayable object", message.operationID))
@@ -1171,16 +1162,12 @@ func (model *Model) completeResourceCommand() {
 	}
 }
 
-func (model *Model) breadcrumb() string {
-	parts := make([]string, 0, len(model.frames))
+func (model *Model) breadcrumb() []BreadcrumbSegment {
+	parts := make([]BreadcrumbSegment, 0, len(model.frames))
 	for _, frame := range model.frames {
-		part := SanitizeCell(frame.Label)
-		if frame.SelectedIdentity != "" {
-			part += "[" + SanitizeCell(frame.SelectedIdentity) + "]"
-		}
-		parts = append(parts, part)
+		parts = append(parts, BreadcrumbSegment{Label: frame.Label, Identity: frame.SelectedIdentity})
 	}
-	return strings.Join(parts, " > ")
+	return parts
 }
 
 func (model *Model) resize() {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestContinuousLayoutNeverProducesNegativeDimensions(t *testing.T) {
@@ -78,9 +79,18 @@ func TestShortcutPaletteUsesRegistryOrderAndResponsivePriority(t *testing.T) {
 	if len(aligned) != 2 || strings.Index(aligned[0], "<c>") != strings.Index(aligned[1], "<dd>") {
 		t.Fatalf("shortcut columns are not aligned: %q", aligned)
 	}
-	if alignedPalette.ColumnWidth() != len("<dd> four") ||
-		!strings.HasSuffix(strings.TrimRight(aligned[0], " "), "<c> three") {
+	if alignedPalette.KeyWidth() != len("<dd>") || alignedPalette.ColumnWidth() != len("<dd> three") ||
+		!strings.HasSuffix(strings.TrimRight(aligned[0], " "), "<c>  three") {
 		t.Fatalf("shortcut columns are not equal-width and right-aligned: %#v %q", alignedPalette, aligned)
+	}
+	leading := 80 - alignedPalette.Width()
+	for index, shortcut := range alignedPalette.Shortcuts() {
+		row := index % alignedPalette.Rows()
+		column := index / alignedPalette.Rows()
+		want := leading + column*(alignedPalette.ColumnWidth()+shortcutGap) + alignedPalette.KeyWidth() + 1
+		if got := strings.Index(aligned[row], shortcut.Description); got != want {
+			t.Fatalf("action %q starts at cell %d, want %d in %q", shortcut.Description, got, want, aligned[row])
+		}
 	}
 
 	restored := LayoutShortcutPalette(shortcuts, 80, maxShortcutRows)
@@ -103,23 +113,23 @@ func TestShellRendersShortcutsOnlyInTopHeader(t *testing.T) {
 	}
 	view := ShellView{
 		Header: HeaderModel{Service: "Inventory API", Origin: "https://api.example.test", Authenticated: true},
-		Page:   page, Breadcrumb: "Items", HintIDs: []BindingID{KeyHelp, KeyDetail, KeyQuit},
+		Page:   page, Breadcrumb: []BreadcrumbSegment{{Label: "Items"}}, HintIDs: []BindingID{KeyHelp, KeyDetail, KeyQuit},
 	}
 	output := shell.Render(view, 48, 12)
 	lines := strings.Split(output, "\n")
-	if len(lines) != 12 || !strings.HasPrefix(lines[0], "Inventory API") ||
+	if len(lines) != 12 || !strings.HasPrefix(lines[0], "Service: Inventory API") ||
 		!strings.Contains(strings.Join(lines[:6], "\n"), "<?> help") ||
 		!strings.Contains(strings.Join(lines[:7], "\n"), "<x> archive") {
 		t.Fatalf("top shortcut palette missing:\n%s", output)
 	}
-	if strings.Contains(lines[0], "Items") || !strings.HasPrefix(lines[2], "https://api.example.test") ||
-		!strings.HasPrefix(lines[3], "authenticated") || strings.TrimSpace(lines[1][:24]) != "" {
+	if strings.Contains(lines[0], "Items") || !strings.HasPrefix(lines[2], "Context: https://api.example.test") ||
+		!strings.HasPrefix(lines[3], "Status: authenticated") || strings.TrimSpace(lines[1][:33]) != "" {
 		t.Fatalf("left header region is not vertically anchored:\n%s", output)
 	}
 	if !strings.HasSuffix(strings.TrimRight(lines[0], " "), "<q> quit") {
 		t.Fatalf("shortcut palette is not anchored to the upper-right:\n%s", output)
 	}
-	if got := strings.TrimSpace(lines[len(lines)-2]); got != "› Items" {
+	if got := strings.TrimSpace(lines[len(lines)-2]); got != "<items>" {
 		t.Fatalf("breadcrumb row contains duplicate hints: %q\n%s", got, output)
 	}
 	if got := strings.TrimSpace(lines[len(lines)-1]); got != "" {
@@ -134,10 +144,11 @@ func TestHeaderLeftRegionAnchorsAndConstrainedPriority(t *testing.T) {
 		Now:         time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC),
 	})
 	want := map[int]string{0: "Inventory API", 4: "https://api.example.test", 5: "authenticated · refreshed 4s ago"}
+	wantKeys := map[int]string{0: "Service", 4: "Context", 5: "Status"}
 	for row := 0; row < 6; row++ {
 		line, present := headerLineAt(lines, row, 6)
 		expected, wanted := want[row]
-		if present != wanted || present && line.value != expected {
+		if present != wanted || present && (line.value != expected || line.key != wantKeys[row]) {
 			t.Fatalf("six-row header row %d = %#v, present %v; want %q, present %v", row, line, present, expected, wanted)
 		}
 	}
@@ -186,7 +197,7 @@ func TestShellSnapshotKeepsAlertOnFinalRowAcrossTransitions(t *testing.T) {
 	shell.Alerts.Push("request", AlertError, "network unavailable")
 	count := 2
 	page := ResourceTablePage{SemanticPage{PageTitle: "Items", PageCount: &count, PageState: PageStale, PageContent: "NAME  STATE\none   ready\ntwo   waiting"}}
-	view := ShellView{Header: HeaderModel{Service: "Inventory API", Origin: "https://api.example.test", Authenticated: true}, Page: page, Breadcrumb: "Items", HintIDs: []BindingID{KeyHelp, KeyQuit}}
+	view := ShellView{Header: HeaderModel{Service: "Inventory API", Origin: "https://api.example.test", Authenticated: true}, Page: page, Breadcrumb: []BreadcrumbSegment{{Label: "Items"}}, HintIDs: []BindingID{KeyHelp, KeyQuit}}
 
 	assertRail := func(label string, output string, height int) {
 		t.Helper()
@@ -201,7 +212,7 @@ func TestShellSnapshotKeepsAlertOnFinalRowAcrossTransitions(t *testing.T) {
 
 	spacious := shell.Render(view, 64, 12)
 	assertRail("spacious", spacious, 12)
-	if !strings.Contains(spacious, "Inventory API") || strings.Contains(spacious, "Inventory API — Items") || !strings.Contains(spacious, "Items[2] · stale") {
+	if !strings.Contains(spacious, "Service: Inventory API") || strings.Contains(spacious, "Inventory API — Items") || !strings.Contains(spacious, "Items(all)[2] · stale") {
 		t.Fatalf("spacious snapshot lost semantic chrome:\n%s", spacious)
 	}
 
@@ -229,7 +240,7 @@ func TestShellSnapshotKeepsAlertOnFinalRowAcrossTransitions(t *testing.T) {
 func TestPageFrameRendersEverySemanticState(t *testing.T) {
 	theme := PlainTheme()
 	for _, state := range []PageState{PageReady, PageLoading, PageEmpty, PageForbidden, PageStale, PageFatal} {
-		output := theme.Frame("Records", state, "content", 32, 5)
+		output := theme.ResourceFrame(PageFrameTitle{Kind: "Records", Context: "all"}, state, "content", 32, 5)
 		if len(strings.Split(output, "\n")) != 5 || !strings.Contains(output, "Records") {
 			t.Fatalf("state %s frame = %q", state, output)
 		}
@@ -240,9 +251,58 @@ func TestPageFrameRendersEverySemanticState(t *testing.T) {
 }
 
 func TestPlainPageFrameSnapshot(t *testing.T) {
-	const expected = "╭ Items ───────╮\n│one           │\n│              │\n╰──────────────╯"
-	if actual := PlainTheme().Frame("Items", PageReady, "one", 16, 4); actual != expected {
+	const expected = "╭─ Items(all) ─╮\n│one           │\n│              │\n╰──────────────╯"
+	if actual := PlainTheme().ResourceFrame(PageFrameTitle{Kind: "Items", Context: "all"}, PageReady, "one", 16, 4); actual != expected {
 		t.Fatalf("page-frame snapshot changed\nexpected:\n%s\nactual:\n%s", expected, actual)
+	}
+}
+
+func TestFrameTitleIsCenteredAndUsesSemanticSegments(t *testing.T) {
+	count := 8
+	title := PageFrameTitle{Kind: "Dinosaur", Context: "all", Count: &count}
+	const width = 44
+	frame := PlainTheme().ResourceFrame(title, PageReady, "", width, 3)
+	top := strings.Split(frame, "\n")[0]
+	label := " Dinosaur(all)[8] "
+	wantStart := 1 + (width-2-len(label))/2
+	labelByte := strings.Index(top, label)
+	if labelByte < 0 {
+		t.Fatalf("frame title absent: %q", top)
+	}
+	if got := ansi.StringWidth(top[:labelByte]); got != wantStart {
+		t.Fatalf("frame title starts at cell %d, want %d: %q", got, wantStart, top)
+	}
+
+	theme := DefaultTheme()
+	if theme.Primary.GetForeground() == theme.Secondary.GetForeground() ||
+		theme.Secondary.GetForeground() == theme.Warning.GetForeground() {
+		t.Fatal("kind, context, and count do not have distinct semantic colors")
+	}
+}
+
+func TestBreadcrumbBadgesPreserveActiveSegmentWhenConstrained(t *testing.T) {
+	segments := []BreadcrumbSegment{
+		{Label: "Projects"},
+		{Label: "Agents"},
+		{Label: "Sessions", Identity: "ABC-7"},
+	}
+	wide := strings.TrimRight(RenderBreadcrumb(segments, PlainTheme(), 80), " ")
+	if wide != " <projects>   <agents>   <sessions[ABC-7]>" {
+		t.Fatalf("wide breadcrumb = %q", wide)
+	}
+	active := " <sessions[ABC-7]> "
+	narrow := strings.TrimRight(RenderBreadcrumb(segments, PlainTheme(), len(active)), " ")
+	if narrow != strings.TrimRight(active, " ") || strings.Contains(narrow, "agents") || strings.Contains(narrow, "projects") {
+		t.Fatalf("constrained breadcrumb did not preserve only active badge: %q", narrow)
+	}
+	if got := strings.TrimSpace(RenderBreadcrumb(segments, PlainTheme(), len(active)-1)); got != "" {
+		t.Fatalf("partial active badge rendered: %q", got)
+	}
+
+	theme := DefaultTheme()
+	if theme.BreadcrumbAncestor.GetBackground() == theme.BreadcrumbActive.GetBackground() ||
+		theme.BreadcrumbAncestor.GetForeground() == theme.BreadcrumbActive.GetForeground() {
+		t.Fatal("ancestor and active breadcrumb badges do not have distinct semantic styles")
 	}
 }
 
@@ -281,11 +341,19 @@ func TestFormDialogFocusEnumValidationZeroAndDuplicateSubmit(t *testing.T) {
 	}
 	keys := DefaultKeyRegistry()
 	form := NewFormDialog(operation, map[string]any{}, keys)
-	if len(form.fields) != 3 || form.fields[0].descriptor.Name != "dry_run" || form.fields[1].descriptor.Name != "count" || form.fields[2].descriptor.Name != "state" {
+	if len(form.fields) != 3 || form.fields[0].descriptor.Name != "count" || form.fields[1].descriptor.Name != "state" || form.fields[2].descriptor.Name != "dry_run" {
 		t.Fatalf("deterministic fields = %#v", form.fields)
 	}
-	if !strings.Contains(form.Content(), "count") || !strings.Contains(form.Content(), "‹ new ›") {
-		t.Fatalf("form content = %q", form.Content())
+	content := form.Content(PlainTheme())
+	if !strings.Contains(content, "count  integer · required") ||
+		!strings.Contains(content, "dry_run  boolean · optional") ||
+		strings.Contains(content, "body field") || strings.Contains(content, "query parameter") ||
+		!strings.Contains(content, "‹ new ›") {
+		t.Fatalf("form content = %q", content)
+	}
+	theme := DefaultTheme()
+	if !theme.FieldTitleStyle.GetBold() || theme.FieldTitleStyle.GetForeground() == theme.Muted.GetForeground() {
+		t.Fatal("field title is not emphasized with a distinct bright foreground")
 	}
 	_, _ = form.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	_, _ = form.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -306,8 +374,8 @@ func TestRequiredStructuredBodySubmitsEmptyObject(t *testing.T) {
 			{Name: "state", Type: "string", Enum: []any{"new", "ready"}},
 		}},
 	}, nil, DefaultKeyRegistry())
-	if !strings.Contains(form.Content(), "‹ unset ›") {
-		t.Fatalf("optional enum was not initially unset: %q", form.Content())
+	if !strings.Contains(form.Content(PlainTheme()), "‹ unset ›") {
+		t.Fatalf("optional enum was not initially unset: %q", form.Content(PlainTheme()))
 	}
 	event, _ := form.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if !event.Submitted || string(event.Request.Body) != `{}` {
@@ -318,8 +386,8 @@ func TestRequiredStructuredBodySubmitsEmptyObject(t *testing.T) {
 func TestDestructiveConfirmationStartsOnCancelAndSubmitsOnce(t *testing.T) {
 	keys := DefaultKeyRegistry()
 	dialog := NewConfirmationDialog("Delete", Confirmation{Title: "Confirm delete", Message: "Delete it?", Destructive: true}, keys)
-	if !strings.Contains(dialog.Content(), "[ Cancel ]") {
-		t.Fatalf("safe focus absent: %q", dialog.Content())
+	if !strings.Contains(dialog.Content(PlainTheme()), "[ Cancel ]") {
+		t.Fatalf("safe focus absent: %q", dialog.Content(PlainTheme()))
 	}
 	confirmed, canceled := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if confirmed || !canceled {

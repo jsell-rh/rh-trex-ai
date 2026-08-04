@@ -117,7 +117,7 @@ The generated TUI SHALL run as a Bubble Tea alternate-screen application whose s
 
 ### Requirement: Service-Neutral Header and Semantic Theme
 
-The shared header's left region SHALL render the sanitized OpenAPI service title on its first row without appending the active page name. When the header has at least three rows, it SHALL leave flexible blank padding below that title, render the active server origin on the penultimate header row, and render authentication state without credential material plus active scope and last successful refresh or current refresh state on the final header row. The page frame and breadcrumb SHALL remain authoritative for active page identity. When fewer than three header rows are available, the shell SHALL preserve complete left-region lines without overlap in service-title, server-origin, then status priority order. It SHALL omit unavailable optional values rather than display invented placeholders. Generated runtime source SHALL contain no TRex-specific logo, service name, resource kind, or color rule.
+The shared header's left region SHALL render sanitized `Key: Value` rows whose keys use one consistent semantic style and whose values retain their own semantic style. Its first row SHALL be `Service: <OpenAPI service title>` without appending the active page name. When the header has at least three rows, it SHALL leave flexible blank padding below that row, render `Context: <active server origin>` on the penultimate header row, and render `Status: <authentication state, active scope, and refresh state>` on the final header row. Authentication state SHALL contain no credential material. The page frame and breadcrumb SHALL remain authoritative for active page identity. When fewer than three header rows are available, the shell SHALL preserve complete left-region rows without overlap in Service, Context, then Status priority order. It SHALL omit unavailable optional values rather than display invented placeholders. Generated runtime source SHALL contain no TRex-specific logo, service name, resource kind, or color rule.
 
 The runtime SHALL define semantic theme tokens for primary, secondary, normal, muted, success, warning, danger, border, and selected foreground and background presentation. Pages and domain components SHALL use those tokens and SHALL NOT define raw terminal colors or ad hoc Lip Gloss styles.
 
@@ -125,15 +125,15 @@ The runtime SHALL define semantic theme tokens for primary, secondary, normal, m
 
 - GIVEN an OpenAPI document is titled `Inventory API` and configures an authenticated HTTPS server
 - WHEN its TUI opens a scoped collection
-- THEN the header SHALL place Inventory API at the upper-left corner without the collection name
-- AND SHALL place the active origin on the penultimate left-region row
-- AND SHALL place authenticated state and current scope on the final left-region row
+- THEN the header SHALL place `Service: Inventory API` at the upper-left corner without the collection name
+- AND SHALL place `Context: https://<active-origin>` on the penultimate left-region row
+- AND SHALL place `Status: authenticated` plus current scope and refresh state on the final left-region row
 - AND any rows between the service title and active origin SHALL be blank in the left region
 - AND no TRex name, dinosaur label, or hard-coded service color SHALL appear
 
 ### Requirement: Contextual Header Shortcut Palette
 
-The shared header SHALL render currently applicable keyboard shortcuts as a k9s-style, multi-row palette whose entries use the form `<key> Action`. The palette SHALL occupy the upper-right region alongside the vertically anchored left service region rather than consume a separate block below it. Every shortcut column SHALL have the same display-cell width, every entry SHALL be left-aligned within its column, and the complete palette block SHALL be right-aligned to the terminal edge. The palette SHALL derive fixed bindings and generated operation hotkeys exclusively from the single keybinding registry used for dispatch and help. It SHALL preserve stable registry order and use no more than six shortcut rows. Hidden, unavailable, or inapplicable capabilities SHALL NOT appear.
+The shared header SHALL render currently applicable keyboard shortcuts as a k9s-style, multi-row palette whose entries use the form `<key> Action`. The palette SHALL occupy the upper-right region alongside the vertically anchored left service region rather than consume a separate block below it. Every shortcut column SHALL have the same display-cell width, every entry SHALL be left-aligned within its column, and the complete palette block SHALL be right-aligned to the terminal edge. Within every palette column, a shared display-cell key width SHALL pad the complete `<key>` token so every Action begins at the same relative display-cell offset regardless of key length. The palette SHALL derive fixed bindings and generated operation hotkeys exclusively from the single keybinding registry used for dispatch and help. It SHALL preserve stable registry order and use no more than six shortcut rows. Hidden, unavailable, or inapplicable capabilities SHALL NOT appear.
 
 The shared layout SHALL render only complete shortcut entries. When terminal width or height is constrained, it SHALL elide lower-priority entries deterministically before higher-priority entries, retain the help shortcut whenever any shortcut row can be rendered, and restore elided entries when space returns. The complete applicable binding set SHALL remain available through the help dialog. The palette SHALL NOT be duplicated in the breadcrumb, alert rail, or a separate bottom shortcut strip, and its layout SHALL NOT use fixed width breakpoints or a minimum terminal width.
 
@@ -142,6 +142,7 @@ The shared layout SHALL render only complete shortcut entries. When terminal wid
 - GIVEN a table supports navigation, detail, sorting, horizontal scrolling, and one generated operation hotkey but does not support delete
 - WHEN the table receives focus
 - THEN the top-right header palette SHALL show the applicable fixed and generated shortcuts as `<key> Action` entries in equal-width columns
+- AND the Action text following `<q>`, `<ctrl+x>`, and every other visible key token SHALL begin at the same relative display-cell offset within its shortcut column
 - AND the service title, active server, and connection status SHALL retain their top, penultimate, and final left-region rows
 - AND those entries and the help dialog SHALL use the same bindings that dispatch the actions
 - AND no delete shortcut or separate bottom shortcut strip SHALL be rendered
@@ -193,14 +194,31 @@ Every list, detail, stream, loading, empty, forbidden, and fatal page SHALL impl
 
 ### Requirement: Shared Resource Table Page
 
-All collection views SHALL use one reusable resource-table page backed by the Bubbles table component. It SHALL render the descriptor-derived `kind(scope)[count]` title, full-row selection, active sort and filter state, deterministic adaptive columns, and shared loading, empty, forbidden, and stale-data states. Sorting, filtering, selection restoration by validated identity, and row navigation SHALL be implemented once for every resource descriptor.
+All collection views SHALL use one reusable resource-table page backed by the Bubbles table component. It SHALL render a descriptor-derived `kind(context)[count]` title centered in the page frame's top border, with unscoped context rendered as `all`. Kind, context, and count SHALL use distinct semantic theme styles, and any non-ready page state SHALL use a fourth state-appropriate semantic style. The component SHALL also render full-row selection, active sort and filter state, deterministic adaptive columns, and shared loading, empty, forbidden, and stale-data states. Sorting, filtering, selection restoration by validated identity, and row navigation SHALL be implemented once for every resource descriptor.
 
 #### Scenario: Render unrelated collection schemas
 
 - GIVEN two collection descriptors have different labels, scopes, columns, and identities
 - WHEN the user switches between them
 - THEN the same resource-table component SHALL render both using their descriptors
+- AND each `kind(context)[count]` label SHALL remain centered in the frame border with visually distinct kind, context, and count segments
 - AND neither view SHALL own a duplicated table setup, empty state, sorting function, or selection policy
+
+### Requirement: Shared Breadcrumb Trail
+
+The shared shell SHALL render navigation history through one reusable breadcrumb component. Each segment SHALL be a padded `<segment>` badge rather than separator-delimited plain text, with its sanitized resource label lowercased and any sanitized selected identity retained in brackets. Ancestor badges and the active rightmost badge SHALL use distinct semantic background and foreground styles, and the active badge SHALL remain visually identifiable when it is the only segment. Breadcrumb order and labels SHALL derive exclusively from the navigation stack. Pages SHALL NOT render or style breadcrumb segments themselves.
+
+The breadcrumb component SHALL measure terminal display cells and render only complete badges. When all badges do not fit, it SHALL elide the oldest ancestors first while preserving the active rightmost badge whenever the available row can contain it. Widening the terminal SHALL restore elided ancestors in navigation order.
+
+#### Scenario: Render and constrain a nested navigation trail
+
+- GIVEN the user navigates from a resource collection through a related collection to an item detail
+- WHEN the breadcrumb row is spacious
+- THEN it SHALL render one padded `<segment>` badge for every navigation frame in order
+- AND the active rightmost badge SHALL have a different semantic foreground and background from its ancestors
+- WHEN the terminal narrows until the complete trail no longer fits
+- THEN only complete badges SHALL remain
+- AND the oldest ancestors SHALL disappear before the active rightmost badge
 
 ### Requirement: Content-Aware Column Sizing and Horizontal Overflow
 
@@ -270,6 +288,8 @@ The shell SHALL reserve its final terminal row for one shared alert rail on ever
 
 Alerts SHALL have semantic info, success, warning, and error severities. Info and success alerts SHALL expire after five seconds. Warning and error alerts SHALL persist until explicit dismissal or a successful retry or relevant corrective action. A lower-severity alert SHALL NOT displace a persistent higher-severity alert; queued alerts SHALL be ordered deterministically. The rail SHALL truncate or summarize within its fixed row using the shared layout policy while retaining full safe details in alert state for a shared detail presentation.
 
+Successful initial list and detail reads, navigation reads, and background refreshes SHALL update content, stale state, and the header refresh timestamp without creating info or success alerts. Success alerts SHALL be reserved for successful user-initiated operations or explicit lifecycle transitions that require acknowledgement; a post-operation read used only to refresh the active view SHALL NOT replace the operation's success message with a routine load message.
+
 #### Scenario: Error location remains constant
 
 - GIVEN a request fails while a table is visible
@@ -286,6 +306,16 @@ Alerts SHALL have semantic info, success, warning, and error severities. Info an
 - AND the shared alert rail SHALL display one summary of the validation failure in its fixed location
 - AND no request SHALL be sent
 
+#### Scenario: Routine data loading is silent
+
+- GIVEN no persistent alert is active
+- WHEN an initial list, item detail, navigation read, or polling refresh succeeds
+- THEN the alert rail SHALL remain empty
+- AND the content and header refresh state SHALL update normally
+- WHEN a user-initiated mutation succeeds and triggers a follow-up read
+- THEN one operation success alert MAY appear
+- AND the follow-up read SHALL NOT add or replace it with a loaded-items success alert
+
 ### Requirement: Shared Dialog Host and Dialog Primitives
 
 One modal host SHALL display at most one centered help, choice, confirmation, or form dialog over the page frame without covering or relocating the breadcrumb footer or alert rail. All dialogs SHALL use one frame, focus trap, button, cancellation, validation-summary, sizing, and in-flight policy. `Esc` SHALL cancel when cancellation is safe, focus navigation SHALL be consistent, destructive confirmation SHALL initially focus the safe cancel action, and an in-flight operation SHALL not be submitted twice.
@@ -301,13 +331,14 @@ One modal host SHALL display at most one centered help, choice, confirmation, or
 
 ### Requirement: Schema-Driven Form Dialog
 
-Create, update, and non-CRUD request input SHALL use one schema-driven form dialog generated from operation parameter and request-body descriptors. Fields SHALL be ordered deterministically, identify required values, use type- and format-appropriate inputs, exclude read-only properties, permit write-only input, constrain enum choices, preserve explicit zero values, and validate before submission. Invalid fields SHALL render inline through the shared field-error component and summarize through the fixed alert rail. Submission SHALL be disabled while invalid or in flight. A supported JSON request body that cannot be represented structurally MAY use a clearly labeled generic raw-JSON field; the runtime SHALL NOT add an operation-specific hand-written form.
+Create, update, and non-CRUD request input SHALL use one schema-driven form dialog generated from operation parameter and request-body descriptors. Fields SHALL be grouped with every required field before every optional field while preserving deterministic descriptor order within each group. Each field heading SHALL show only its sanitized field name, type including format when present, and the word `required` or `optional`; it SHALL NOT expose implementation labels such as `body field`, `query parameter`, or descriptor locations. The field name SHALL use the theme's bright normal foreground with emphasis, while type and requiredness SHALL use muted metadata styling. Forms SHALL use type- and format-appropriate inputs, exclude read-only properties, permit write-only input, constrain enum choices, preserve explicit zero values, and validate before submission. Invalid fields SHALL render inline through the shared field-error component and summarize through the fixed alert rail. Submission SHALL be disabled while invalid or in flight. A supported JSON request body that cannot be represented structurally MAY use a generic raw-JSON field named `body`; the runtime SHALL NOT add an operation-specific hand-written form.
 
 #### Scenario: Reuse one form for different operations
 
 - GIVEN create and action operations have different required parameters, enum fields, and writable body properties
 - WHEN each operation opens its input dialog
-- THEN the same form component SHALL render fields from the corresponding descriptor in deterministic order
+- THEN the same form component SHALL render all required fields before all optional fields and retain deterministic order inside those groups
+- AND each field heading SHALL contain only its visually emphasized name, muted type, and muted required or optional state
 - AND read-only fields SHALL be absent
 - AND invalid or duplicate submission SHALL make no request
 
@@ -334,7 +365,7 @@ The header SHALL show refresh activity and the last successful refresh age. A pa
 
 ### Requirement: Presentation Component Conformance Gate
 
-The generated runtime SHALL have deterministic component tests for spacious, constrained, and extremely narrow continuous layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover contextual header shortcut ordering, display-cell column alignment, the six-row bound, responsive elision and restoration, help and dispatch parity, and absence of a duplicate bottom shortcut strip. Tests SHALL also cover content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, shortcut-palette layout, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
+The generated runtime SHALL have deterministic component tests for spacious, constrained, and extremely narrow continuous layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover semantic header key/value rows, contextual header shortcut ordering, equal shortcut-column widths, aligned Action offsets after variable-width key tokens, the six-row bound, responsive elision and restoration, help and dispatch parity, and absence of a duplicate bottom shortcut strip. Tests SHALL also cover centered and semantically segmented resource titles, complete-badge breadcrumb rendering and responsive ancestor elision, content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, required-first field ordering, simplified semantic field headings, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, shortcut-palette layout, breadcrumb layout, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
 
 #### Scenario: Prove one presentation system
 
@@ -712,7 +743,9 @@ Continuous integration SHALL run the TUI generator against the fully resolved re
 | Semantic components own presentation policy | One implementation of each page, dialog, alert, state, and chrome primitive prevents resource or operation views from drifting apart |
 | Fixed bottom alert rail | Errors remain spatially predictable across pages, modes, dialogs, and responsive layouts while inline field and fatal context remain available |
 | One keybinding registry | Dispatch, contextual hints, generated hotkeys, conflict validation, and help cannot silently disagree |
-| Contextual shortcuts in a two-region top header | A terminal-right, equal-column k9s-style palette shares rows with a vertically anchored left service context, keeping current actions discoverable without consuming a second vertical block or competing with the bottom rails |
+| Contextual shortcuts in a two-region top header | A terminal-right, equal-column k9s-style palette with one shared key-token subcolumn shares rows with a vertically anchored key/value service context, keeping actions aligned and discoverable without consuming a second vertical block or competing with the bottom rails |
+| Centered semantic resource identity | A centered `kind(context)[count]` frame title mirrors established terminal navigation tools while distinct theme tokens keep resource, context, count, and state scannable without page-owned styling |
+| Badge breadcrumb trail | Shared, semantically differentiated `<segment>` badges preserve navigation hierarchy and active-location emphasis while complete-badge elision keeps constrained layouts legible |
 | Central theme and responsive layout | Semantic tokens and one measurement authority eliminate ad hoc styling and conflicting terminal arithmetic |
 | Content-sized columns with signaled horizontal overflow | Natural display-cell widths preserve information density, bounded compression handles constrained terminals, and directional indicators make every off-screen column discoverable through arrow-key scrolling |
 | Modal schema-driven forms | Descriptor inputs can share validation, focus, cancellation, and in-flight behavior without operation-specific form code |

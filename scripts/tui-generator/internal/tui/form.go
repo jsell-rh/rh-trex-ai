@@ -14,14 +14,14 @@ import (
 )
 
 type formFieldDescriptor struct {
-	Name, Label, Location string
-	Type, Format          string
-	Required              bool
-	Enum                  []any
-	Default               any
-	Body                  bool
-	RawJSON               bool
-	Parameter             *Parameter
+	Name, Location string
+	Type, Format   string
+	Required       bool
+	Enum           []any
+	Default        any
+	Body           bool
+	RawJSON        bool
+	Parameter      *Parameter
 }
 
 type formField struct {
@@ -65,7 +65,7 @@ func NewFormDialog(operation Operation, values map[string]any, keys KeyRegistry)
 		}
 		copy := parameter
 		form.fields = append(form.fields, newFormField(formFieldDescriptor{
-			Name: parameter.Name, Label: parameter.In + " parameter " + parameter.Name,
+			Name:     parameter.Name,
 			Location: parameter.In, Type: parameter.Type, Format: parameter.Format,
 			Required: parameter.Required, Enum: append([]any(nil), parameter.Enum...), Default: parameter.Default,
 			Parameter: &copy,
@@ -75,7 +75,7 @@ func NewFormDialog(operation Operation, values map[string]any, keys KeyRegistry)
 		form.bodyRequired = operation.RequestBody.Required
 		if len(operation.RequestBody.Fields) == 0 {
 			form.fields = append(form.fields, newFormField(formFieldDescriptor{
-				Name: "body", Label: "JSON request body", Location: "body", Type: "object",
+				Name: "body", Location: "body", Type: "object",
 				Required: operation.RequestBody.Required, Body: true, RawJSON: true,
 			}))
 		} else {
@@ -84,13 +84,16 @@ func NewFormDialog(operation Operation, values map[string]any, keys KeyRegistry)
 					continue
 				}
 				form.fields = append(form.fields, newFormField(formFieldDescriptor{
-					Name: field.Name, Label: "body field " + field.Name, Location: "body",
+					Name: field.Name, Location: "body",
 					Type: field.Type, Format: field.Format, Required: field.Required,
 					Enum: append([]any(nil), field.Enum...), Default: field.Default, Body: true,
 				}))
 			}
 		}
 	}
+	sort.SliceStable(form.fields, func(left, right int) bool {
+		return form.fields[left].descriptor.Required && !form.fields[right].descriptor.Required
+	})
 	if len(form.fields) > 0 {
 		form.focusField(0)
 	}
@@ -133,7 +136,7 @@ func (form *FormDialog) Footer() string {
 	return form.keys.Hints(keys...)
 }
 
-func (form *FormDialog) Content() string {
+func (form *FormDialog) Content(theme Theme) string {
 	if len(form.fields) == 0 {
 		return "No input is required."
 	}
@@ -144,16 +147,13 @@ func (form *FormDialog) Content() string {
 		if index == form.focus {
 			marker = "> "
 		}
-		required := " — optional"
+		required := "optional"
 		if field.descriptor.Required {
-			required = " — required"
+			required = "required"
 		}
 		typeName := field.descriptor.Type
 		if field.descriptor.Format != "" {
 			typeName += "/" + field.descriptor.Format
-		}
-		if typeName != "" {
-			typeName = " (" + typeName + ")"
 		}
 		value := field.input.View()
 		if len(field.descriptor.Enum) > 0 {
@@ -163,7 +163,9 @@ func (form *FormDialog) Content() string {
 			}
 			value = "‹ " + SanitizeCell(choice) + " ›"
 		}
-		lines = append(lines, marker+SanitizeCell(field.descriptor.Label)+typeName+required+": "+value)
+		heading := theme.FieldTitle(SanitizeCell(field.descriptor.Name))
+		metadata := theme.FieldMetadata(typeName + " · " + required)
+		lines = append(lines, marker+heading+"  "+metadata+": "+value)
 		if field.err != "" {
 			lines = append(lines, "    ! "+SanitizeCell(field.err))
 		}
@@ -297,7 +299,7 @@ func validateFormField(field *formField) error {
 	value := strings.TrimSpace(field.input.Value())
 	if value == "" {
 		if field.descriptor.Required {
-			return fmt.Errorf("%s is required", field.descriptor.Label)
+			return fmt.Errorf("%s is required", field.descriptor.Name)
 		}
 		return nil
 	}
@@ -418,7 +420,7 @@ func (dialog *ConfirmationDialog) Title() string    { return dialog.confirmation
 func (dialog *ConfirmationDialog) Footer() string {
 	return dialog.keys.Hints(KeyNextFocus, KeySubmit, KeyCancel)
 }
-func (dialog *ConfirmationDialog) Content() string {
+func (dialog *ConfirmationDialog) Content(Theme) string {
 	message := SanitizeCell(dialog.confirmation.Message)
 	if dialog.confirmation.Destructive {
 		message = "DESTRUCTIVE · " + message

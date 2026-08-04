@@ -47,6 +47,15 @@ func badPage(shortcuts []ShortcutHint) { LayoutShortcutPalette(shortcuts, 80, 6)
 	}
 }
 
+func TestArchitectureGateRejectsSyntheticPageOwnedBreadcrumbLayout(t *testing.T) {
+	failures := presentationPolicyViolations(map[string]string{"bad_page.go": `package tui
+func badPage(segments []BreadcrumbSegment, theme Theme) { RenderBreadcrumb(segments, theme, 80) }
+`})
+	if len(failures) == 0 {
+		t.Fatal("architecture gate accepted page-owned breadcrumb layout")
+	}
+}
+
 func presentationPolicyViolations(sources map[string]string) []string {
 	var failures []string
 	for name, source := range sources {
@@ -64,6 +73,9 @@ func presentationPolicyViolations(sources map[string]string) []string {
 		}
 		if name != "shortcut_palette.go" && name != "layout.go" && strings.Contains(source, "LayoutShortcutPalette(") {
 			failures = append(failures, name+": shortcut-palette layout outside shortcut_palette.go")
+		}
+		if name != "breadcrumb.go" && name != "shell.go" && strings.Contains(source, "RenderBreadcrumb(") {
+			failures = append(failures, name+": breadcrumb layout outside breadcrumb.go")
 		}
 		if name != "alert.go" && (strings.Contains(source, "alertLifetime") || strings.Contains(source, "alertPriority(")) {
 			failures = append(failures, name+": alert lifetime/priority outside alert.go")

@@ -18,6 +18,7 @@ type ShortcutPalette struct {
 	rows        int
 	columns     int
 	columnWidth int
+	keyWidth    int
 	hidden      int
 }
 
@@ -63,9 +64,13 @@ func LayoutShortcutPalette(shortcuts []ShortcutHint, width, maxRows int) Shortcu
 func packShortcutPalette(shortcuts []ShortcutHint, width, maxRows int) ShortcutPalette {
 	rows := min(maxRows, len(shortcuts))
 	columns := (len(shortcuts) + rows - 1) / rows
+	keyWidth := 0
+	for _, shortcut := range shortcuts {
+		keyWidth = max(keyWidth, shortcutKeyWidth(shortcut))
+	}
 	columnWidth := 0
 	for _, shortcut := range shortcuts {
-		columnWidth = max(columnWidth, ansi.StringWidth(shortcut.Text()))
+		columnWidth = max(columnWidth, shortcutEntryWidth(shortcut, keyWidth))
 	}
 	total := columns*columnWidth + shortcutGap*max(0, columns-1)
 	if total > width {
@@ -73,8 +78,16 @@ func packShortcutPalette(shortcuts []ShortcutHint, width, maxRows int) ShortcutP
 	}
 	return ShortcutPalette{
 		shortcuts: append([]ShortcutHint(nil), shortcuts...),
-		rows:      rows, columns: columns, columnWidth: columnWidth,
+		rows:      rows, columns: columns, columnWidth: columnWidth, keyWidth: keyWidth,
 	}
+}
+
+func shortcutKeyWidth(shortcut ShortcutHint) int {
+	return ansi.StringWidth("<" + shortcut.Key + ">")
+}
+
+func shortcutEntryWidth(shortcut ShortcutHint, keyWidth int) int {
+	return keyWidth + 1 + ansi.StringWidth(shortcut.Description)
 }
 
 func (palette ShortcutPalette) Rows() int { return palette.rows }
@@ -82,6 +95,8 @@ func (palette ShortcutPalette) Rows() int { return palette.rows }
 func (palette ShortcutPalette) Hidden() int { return palette.hidden }
 
 func (palette ShortcutPalette) ColumnWidth() int { return palette.columnWidth }
+
+func (palette ShortcutPalette) KeyWidth() int { return palette.keyWidth }
 
 func (palette ShortcutPalette) Width() int {
 	return palette.columns*palette.columnWidth + shortcutGap*max(0, palette.columns-1)
@@ -105,9 +120,9 @@ func (palette ShortcutPalette) Render(theme Theme, width int) []string {
 				break
 			}
 			shortcut := palette.shortcuts[index]
-			line.WriteString(theme.Shortcut(shortcut))
+			line.WriteString(theme.Shortcut(shortcut, palette.keyWidth))
 			if column+1 < palette.columns && index+palette.rows < len(palette.shortcuts) {
-				line.WriteString(strings.Repeat(" ", palette.columnWidth-ansi.StringWidth(shortcut.Text())+shortcutGap))
+				line.WriteString(strings.Repeat(" ", palette.columnWidth-shortcutEntryWidth(shortcut, palette.keyWidth)+shortcutGap))
 			}
 		}
 		result = append(result, theme.ClampLine(line.String(), width))

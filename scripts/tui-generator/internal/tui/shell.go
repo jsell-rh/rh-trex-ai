@@ -15,6 +15,7 @@ const (
 )
 
 type headerLine struct {
+	key   string
 	value string
 	kind  headerLineKind
 }
@@ -33,7 +34,7 @@ type ShellView struct {
 	Header     HeaderModel
 	Page       Page
 	Command    string
-	Breadcrumb string
+	Breadcrumb []BreadcrumbSegment
 	HintIDs    []BindingID
 }
 
@@ -75,11 +76,11 @@ func (shell *Shell) Render(view ShellView, width, height int) string {
 	}
 	if layout.PageRows > 0 {
 		pageBody := shell.Modal.Render(view.Page.Content(), layout.ContentWidth, layout.ContentHeight, shell.Theme)
-		framed := shell.Theme.Frame(pageFrameTitle(view.Page), view.Page.State(), pageBody, layout.Width, layout.PageRows)
+		framed := shell.Theme.ResourceFrame(pageFrameTitle(view.Page), view.Page.State(), pageBody, layout.Width, layout.PageRows)
 		rows = append(rows, strings.Split(framed, "\n")...)
 	}
 	if layout.BreadcrumbRows > 0 {
-		rows = append(rows, shell.Theme.ClampLine("› "+SanitizeCell(view.Breadcrumb), layout.Width))
+		rows = append(rows, RenderBreadcrumb(view.Breadcrumb, shell.Theme, layout.Width))
 	}
 	for len(rows) < layout.Height-layout.AlertRows {
 		rows = append(rows, shell.Theme.ClampLine("", layout.Width))
@@ -106,13 +107,14 @@ func renderHeader(header HeaderModel, layout ShellLayout, theme Theme) []string 
 		if layout.HeaderLeftWidth > 0 {
 			left := ""
 			if headerLine, present := headerLineAt(leftLines, row, layout.HeaderRows); present {
+				left = theme.HeaderKey(headerLine.key+":") + " "
 				switch headerLine.kind {
 				case headerService:
-					left = theme.Header(headerLine.value)
+					left += theme.Standard(headerLine.value)
 				case headerServer:
-					left = theme.Emphasis(headerLine.value)
+					left += theme.Emphasis(headerLine.value)
 				default:
-					left = theme.Subtle(headerLine.value)
+					left += theme.Subtle(headerLine.value)
 				}
 			}
 			line.WriteString(theme.ClampLine(left, layout.HeaderLeftWidth))
@@ -133,11 +135,11 @@ func renderHeader(header HeaderModel, layout ShellLayout, theme Theme) []string 
 func buildHeaderLines(header HeaderModel) []headerLine {
 	var lines []headerLine
 	if service := SanitizeCell(header.Service); service != "" {
-		lines = append(lines, headerLine{value: service, kind: headerService})
+		lines = append(lines, headerLine{key: "Service", value: service, kind: headerService})
 	}
 	if raw := strings.TrimSpace(header.Origin); raw != "" {
 		if parsed, err := url.Parse(raw); err == nil && parsed.Scheme != "" && parsed.Host != "" {
-			lines = append(lines, headerLine{value: SanitizeCell(parsed.Scheme + "://" + parsed.Host), kind: headerServer})
+			lines = append(lines, headerLine{key: "Context", value: SanitizeCell(parsed.Scheme + "://" + parsed.Host), kind: headerServer})
 		}
 	}
 
@@ -161,7 +163,7 @@ func buildHeaderLines(header HeaderModel) []headerLine {
 		status = append(status, "refreshed "+age.String()+" ago")
 	}
 	if len(status) > 0 {
-		lines = append(lines, headerLine{value: strings.Join(status, " · "), kind: headerStatus})
+		lines = append(lines, headerLine{key: "Status", value: strings.Join(status, " · "), kind: headerStatus})
 	}
 	return lines
 }
@@ -191,7 +193,7 @@ func headerLineAt(lines []headerLine, row, rows int) (headerLine, bool) {
 func headerLineValues(lines []headerLine) []string {
 	values := make([]string, 0, len(lines))
 	for _, line := range lines {
-		values = append(values, line.value)
+		values = append(values, line.key+": "+line.value)
 	}
 	return values
 }

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -83,13 +82,20 @@ type DetailStreamComponent struct {
 	connected    bool
 }
 
-func pageFrameTitle(page Page) string {
-	title := SanitizeCell(page.Title())
-	if scope := SanitizeCell(page.Scope()); scope != "" {
-		title += "(" + scope + ")"
+type PageFrameTitle struct {
+	Kind    string
+	Context string
+	Count   *int
+}
+
+func pageFrameTitle(page Page) PageFrameTitle {
+	context := SanitizeCell(page.Scope())
+	if context == "" {
+		context = "all"
 	}
-	if count := page.Count(); count != nil {
-		title += fmt.Sprintf("[%d]", *count)
+	return PageFrameTitle{
+		Kind:    SanitizeCell(page.Title()),
+		Context: context,
+		Count:   page.Count(),
 	}
-	return title
 }

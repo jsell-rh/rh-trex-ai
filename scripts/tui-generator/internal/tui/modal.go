@@ -18,7 +18,7 @@ const (
 type Dialog interface {
 	Kind() DialogKind
 	Title() string
-	Content() string
+	Content(Theme) string
 	Footer() string
 }
 
@@ -31,8 +31,10 @@ type StaticDialog struct {
 
 func (dialog StaticDialog) Kind() DialogKind { return dialog.DialogKind }
 func (dialog StaticDialog) Title() string    { return dialog.DialogTitle }
-func (dialog StaticDialog) Content() string  { return dialog.DialogContent }
-func (dialog StaticDialog) Footer() string   { return dialog.DialogFooter }
+func (dialog StaticDialog) Content(Theme) string {
+	return dialog.DialogContent
+}
+func (dialog StaticDialog) Footer() string { return dialog.DialogFooter }
 
 type ModalHost struct{ dialog Dialog }
 
@@ -46,7 +48,7 @@ func (host ModalHost) Render(base string, width, height int, theme Theme) string
 	if host.dialog == nil || width <= 0 || height <= 0 {
 		return base
 	}
-	content := host.dialog.Content()
+	content := host.dialog.Content(theme)
 	if footer := host.dialog.Footer(); footer != "" {
 		content += "\n\n" + footer
 	}
