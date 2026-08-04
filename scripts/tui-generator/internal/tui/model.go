@@ -290,7 +290,7 @@ func (model *Model) View() string {
 func (model *Model) shellView(view View, page Page, command string) ShellView {
 	return ShellView{
 		Header: HeaderModel{
-			Service: model.descriptor.Title, Page: view.Label, Origin: model.serverOrigin(),
+			Service: model.descriptor.Title, Origin: model.serverOrigin(),
 			Authenticated: model.authenticated(), Scope: model.scope(), Refreshing: model.currentRefreshing(),
 			LastSuccess: model.currentLastSuccess(), Now: model.currentTime(),
 		},

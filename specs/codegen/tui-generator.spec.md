@@ -117,7 +117,7 @@ The generated TUI SHALL run as a Bubble Tea alternate-screen application whose s
 
 ### Requirement: Service-Neutral Header and Semantic Theme
 
-The shared header SHALL anchor the sanitized active server origin at its upper-left corner, followed vertically by the OpenAPI title and active page identity, authentication state without credential material, active scope, and last successful refresh or current refresh state when those values are available. It SHALL omit unavailable optional values rather than display invented placeholders. Generated runtime source SHALL contain no TRex-specific logo, service name, resource kind, or color rule.
+The shared header's left region SHALL render the sanitized OpenAPI service title on its first row without appending the active page name. When the header has at least three rows, it SHALL leave flexible blank padding below that title, render the active server origin on the penultimate header row, and render authentication state without credential material plus active scope and last successful refresh or current refresh state on the final header row. The page frame and breadcrumb SHALL remain authoritative for active page identity. When fewer than three header rows are available, the shell SHALL preserve complete left-region lines without overlap in service-title, server-origin, then status priority order. It SHALL omit unavailable optional values rather than display invented placeholders. Generated runtime source SHALL contain no TRex-specific logo, service name, resource kind, or color rule.
 
 The runtime SHALL define semantic theme tokens for primary, secondary, normal, muted, success, warning, danger, border, and selected foreground and background presentation. Pages and domain components SHALL use those tokens and SHALL NOT define raw terminal colors or ad hoc Lip Gloss styles.
 
@@ -125,13 +125,15 @@ The runtime SHALL define semantic theme tokens for primary, secondary, normal, m
 
 - GIVEN an OpenAPI document is titled `Inventory API` and configures an authenticated HTTPS server
 - WHEN its TUI opens a scoped collection
-- THEN the header SHALL place the active origin at the upper-left corner
-- AND SHALL identify Inventory API, the active page, authenticated state, and current scope beneath it
+- THEN the header SHALL place Inventory API at the upper-left corner without the collection name
+- AND SHALL place the active origin on the penultimate left-region row
+- AND SHALL place authenticated state and current scope on the final left-region row
+- AND any rows between the service title and active origin SHALL be blank in the left region
 - AND no TRex name, dinosaur label, or hard-coded service color SHALL appear
 
 ### Requirement: Contextual Header Shortcut Palette
 
-The shared header SHALL render currently applicable keyboard shortcuts as a k9s-style, multi-row palette whose entries use the form `<key> Action`. The palette SHALL occupy the upper-right region alongside the left-aligned server and service metadata rather than consume a separate block below it. Every shortcut column SHALL have the same display-cell width, every entry SHALL be left-aligned within its column, and the complete palette block SHALL be right-aligned to the terminal edge. The palette SHALL derive fixed bindings and generated operation hotkeys exclusively from the single keybinding registry used for dispatch and help. It SHALL preserve stable registry order and use no more than six shortcut rows. Hidden, unavailable, or inapplicable capabilities SHALL NOT appear.
+The shared header SHALL render currently applicable keyboard shortcuts as a k9s-style, multi-row palette whose entries use the form `<key> Action`. The palette SHALL occupy the upper-right region alongside the vertically anchored left service region rather than consume a separate block below it. Every shortcut column SHALL have the same display-cell width, every entry SHALL be left-aligned within its column, and the complete palette block SHALL be right-aligned to the terminal edge. The palette SHALL derive fixed bindings and generated operation hotkeys exclusively from the single keybinding registry used for dispatch and help. It SHALL preserve stable registry order and use no more than six shortcut rows. Hidden, unavailable, or inapplicable capabilities SHALL NOT appear.
 
 The shared layout SHALL render only complete shortcut entries. When terminal width or height is constrained, it SHALL elide lower-priority entries deterministically before higher-priority entries, retain the help shortcut whenever any shortcut row can be rendered, and restore elided entries when space returns. The complete applicable binding set SHALL remain available through the help dialog. The palette SHALL NOT be duplicated in the breadcrumb, alert rail, or a separate bottom shortcut strip, and its layout SHALL NOT use fixed width breakpoints or a minimum terminal width.
 
@@ -140,7 +142,7 @@ The shared layout SHALL render only complete shortcut entries. When terminal wid
 - GIVEN a table supports navigation, detail, sorting, horizontal scrolling, and one generated operation hotkey but does not support delete
 - WHEN the table receives focus
 - THEN the top-right header palette SHALL show the applicable fixed and generated shortcuts as `<key> Action` entries in equal-width columns
-- AND the active server SHALL remain anchored at the upper-left corner
+- AND the service title, active server, and connection status SHALL retain their top, penultimate, and final left-region rows
 - AND those entries and the help dialog SHALL use the same bindings that dispatch the actions
 - AND no delete shortcut or separate bottom shortcut strip SHALL be rendered
 
@@ -710,7 +712,7 @@ Continuous integration SHALL run the TUI generator against the fully resolved re
 | Semantic components own presentation policy | One implementation of each page, dialog, alert, state, and chrome primitive prevents resource or operation views from drifting apart |
 | Fixed bottom alert rail | Errors remain spatially predictable across pages, modes, dialogs, and responsive layouts while inline field and fatal context remain available |
 | One keybinding registry | Dispatch, contextual hints, generated hotkeys, conflict validation, and help cannot silently disagree |
-| Contextual shortcuts in a two-region top header | A terminal-right, equal-column k9s-style palette shares rows with upper-left connection metadata, keeping current actions discoverable without consuming a second vertical block or competing with the bottom rails |
+| Contextual shortcuts in a two-region top header | A terminal-right, equal-column k9s-style palette shares rows with a vertically anchored left service context, keeping current actions discoverable without consuming a second vertical block or competing with the bottom rails |
 | Central theme and responsive layout | Semantic tokens and one measurement authority eliminate ad hoc styling and conflicting terminal arithmetic |
 | Content-sized columns with signaled horizontal overflow | Natural display-cell widths preserve information density, bounded compression handles constrained terminals, and directional indicators make every off-screen column discoverable through arrow-key scrolling |
 | Modal schema-driven forms | Descriptor inputs can share validation, focus, cancellation, and in-flight behavior without operation-specific form code |

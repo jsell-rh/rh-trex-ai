@@ -9,8 +9,8 @@ import (
 type headerLineKind uint8
 
 const (
-	headerServer headerLineKind = iota
-	headerIdentity
+	headerService headerLineKind = iota
+	headerServer
 	headerStatus
 )
 
@@ -21,7 +21,6 @@ type headerLine struct {
 
 type HeaderModel struct {
 	Service       string
-	Page          string
 	Origin        string
 	Authenticated bool
 	Scope         string
@@ -106,14 +105,14 @@ func renderHeader(header HeaderModel, layout ShellLayout, theme Theme) []string 
 		var line strings.Builder
 		if layout.HeaderLeftWidth > 0 {
 			left := ""
-			if row < len(leftLines) {
-				switch leftLines[row].kind {
+			if headerLine, present := headerLineAt(leftLines, row, layout.HeaderRows); present {
+				switch headerLine.kind {
+				case headerService:
+					left = theme.Header(headerLine.value)
 				case headerServer:
-					left = theme.Header(leftLines[row].value)
-				case headerIdentity:
-					left = theme.Emphasis(leftLines[row].value)
+					left = theme.Emphasis(headerLine.value)
 				default:
-					left = theme.Subtle(leftLines[row].value)
+					left = theme.Subtle(headerLine.value)
 				}
 			}
 			line.WriteString(theme.ClampLine(left, layout.HeaderLeftWidth))
@@ -133,21 +132,13 @@ func renderHeader(header HeaderModel, layout ShellLayout, theme Theme) []string 
 
 func buildHeaderLines(header HeaderModel) []headerLine {
 	var lines []headerLine
+	if service := SanitizeCell(header.Service); service != "" {
+		lines = append(lines, headerLine{value: service, kind: headerService})
+	}
 	if raw := strings.TrimSpace(header.Origin); raw != "" {
 		if parsed, err := url.Parse(raw); err == nil && parsed.Scheme != "" && parsed.Host != "" {
 			lines = append(lines, headerLine{value: SanitizeCell(parsed.Scheme + "://" + parsed.Host), kind: headerServer})
 		}
-	}
-
-	identity := SanitizeCell(header.Service)
-	if header.Page != "" {
-		if identity != "" {
-			identity += " — "
-		}
-		identity += SanitizeCell(header.Page)
-	}
-	if identity != "" {
-		lines = append(lines, headerLine{value: identity, kind: headerIdentity})
 	}
 
 	var status []string
@@ -173,6 +164,28 @@ func buildHeaderLines(header HeaderModel) []headerLine {
 		lines = append(lines, headerLine{value: strings.Join(status, " · "), kind: headerStatus})
 	}
 	return lines
+}
+
+func headerLineAt(lines []headerLine, row, rows int) (headerLine, bool) {
+	if rows < 3 {
+		if row >= 0 && row < len(lines) {
+			return lines[row], true
+		}
+		return headerLine{}, false
+	}
+	for _, line := range lines {
+		target := 0
+		switch line.kind {
+		case headerServer:
+			target = rows - 2
+		case headerStatus:
+			target = rows - 1
+		}
+		if row == target {
+			return line, true
+		}
+	}
+	return headerLine{}, false
 }
 
 func headerLineValues(lines []headerLine) []string {

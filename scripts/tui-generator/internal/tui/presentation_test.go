@@ -102,15 +102,19 @@ func TestShellRendersShortcutsOnlyInTopHeader(t *testing.T) {
 		PageActions: []LocalAction{{Label: "archive", Hotkey: "x"}},
 	}
 	view := ShellView{
-		Header: HeaderModel{Service: "Inventory API", Page: "Items", Origin: "https://api.example.test", Authenticated: true},
+		Header: HeaderModel{Service: "Inventory API", Origin: "https://api.example.test", Authenticated: true},
 		Page:   page, Breadcrumb: "Items", HintIDs: []BindingID{KeyHelp, KeyDetail, KeyQuit},
 	}
 	output := shell.Render(view, 48, 12)
 	lines := strings.Split(output, "\n")
-	if len(lines) != 12 || !strings.HasPrefix(lines[0], "https://api.example.test") ||
+	if len(lines) != 12 || !strings.HasPrefix(lines[0], "Inventory API") ||
 		!strings.Contains(strings.Join(lines[:6], "\n"), "<?> help") ||
 		!strings.Contains(strings.Join(lines[:7], "\n"), "<x> archive") {
 		t.Fatalf("top shortcut palette missing:\n%s", output)
+	}
+	if strings.Contains(lines[0], "Items") || !strings.HasPrefix(lines[2], "https://api.example.test") ||
+		!strings.HasPrefix(lines[3], "authenticated") || strings.TrimSpace(lines[1][:24]) != "" {
+		t.Fatalf("left header region is not vertically anchored:\n%s", output)
 	}
 	if !strings.HasSuffix(strings.TrimRight(lines[0], " "), "<q> quit") {
 		t.Fatalf("shortcut palette is not anchored to the upper-right:\n%s", output)
@@ -120,6 +124,28 @@ func TestShellRendersShortcutsOnlyInTopHeader(t *testing.T) {
 	}
 	if got := strings.TrimSpace(lines[len(lines)-1]); got != "" {
 		t.Fatalf("empty alert rail moved or contains hints: %q\n%s", got, output)
+	}
+}
+
+func TestHeaderLeftRegionAnchorsAndConstrainedPriority(t *testing.T) {
+	lines := buildHeaderLines(HeaderModel{
+		Service: "Inventory API", Origin: "https://api.example.test", Authenticated: true,
+		LastSuccess: time.Date(2026, 8, 4, 11, 59, 56, 0, time.UTC),
+		Now:         time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC),
+	})
+	want := map[int]string{0: "Inventory API", 4: "https://api.example.test", 5: "authenticated · refreshed 4s ago"}
+	for row := 0; row < 6; row++ {
+		line, present := headerLineAt(lines, row, 6)
+		expected, wanted := want[row]
+		if present != wanted || present && line.value != expected {
+			t.Fatalf("six-row header row %d = %#v, present %v; want %q, present %v", row, line, present, expected, wanted)
+		}
+	}
+	for row, expected := range []string{"Inventory API", "https://api.example.test"} {
+		line, present := headerLineAt(lines, row, 2)
+		if !present || line.value != expected {
+			t.Fatalf("two-row header row %d = %#v, present %v; want %q", row, line, present, expected)
+		}
 	}
 }
 
@@ -160,7 +186,7 @@ func TestShellSnapshotKeepsAlertOnFinalRowAcrossTransitions(t *testing.T) {
 	shell.Alerts.Push("request", AlertError, "network unavailable")
 	count := 2
 	page := ResourceTablePage{SemanticPage{PageTitle: "Items", PageCount: &count, PageState: PageStale, PageContent: "NAME  STATE\none   ready\ntwo   waiting"}}
-	view := ShellView{Header: HeaderModel{Service: "Inventory API", Page: "Items", Origin: "https://api.example.test", Authenticated: true}, Page: page, Breadcrumb: "Items", HintIDs: []BindingID{KeyHelp, KeyQuit}}
+	view := ShellView{Header: HeaderModel{Service: "Inventory API", Origin: "https://api.example.test", Authenticated: true}, Page: page, Breadcrumb: "Items", HintIDs: []BindingID{KeyHelp, KeyQuit}}
 
 	assertRail := func(label string, output string, height int) {
 		t.Helper()
@@ -175,7 +201,7 @@ func TestShellSnapshotKeepsAlertOnFinalRowAcrossTransitions(t *testing.T) {
 
 	spacious := shell.Render(view, 64, 12)
 	assertRail("spacious", spacious, 12)
-	if !strings.Contains(spacious, "Inventory API — Items") || !strings.Contains(spacious, "Items[2] · stale") {
+	if !strings.Contains(spacious, "Inventory API") || strings.Contains(spacious, "Inventory API — Items") || !strings.Contains(spacious, "Items[2] · stale") {
 		t.Fatalf("spacious snapshot lost semantic chrome:\n%s", spacious)
 	}
 
