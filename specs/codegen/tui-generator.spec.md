@@ -34,7 +34,7 @@ resolved OpenAPI -> canonical IR -> TUI descriptors -> generic runtime
 | Semantic composition | Pages SHALL describe content and local actions by composing shared components; they SHALL NOT recreate chrome, dialogs, alerts, key handling, or styles |
 | One source of presentation truth | Theme tokens, layout breakpoints, global keybindings, hints, alert policy, and dialog behavior SHALL each be defined centrally |
 | Capability-derived interaction | Controls and forms SHALL be produced from canonical operation descriptors and SHALL NOT be added for a literal resource name |
-| Responsive degradation | Constrained terminals SHALL omit lower-priority information before navigation, active context, or alert visibility |
+| Responsive degradation | Constrained terminals SHALL compress content and expose navigable overflow before omitting navigation, active context, or alert visibility |
 | Spatially stable errors | Every error SHALL have a sanitized summary in one bottom-anchored alert rail whose terminal row does not move between pages or interaction modes |
 | Safe rendering boundary | All presentation components SHALL sanitize untrusted metadata and response content at the final rendering boundary |
 | Deterministic output | The same descriptors, state, terminal size, and theme SHALL produce the same visible component tree and generated source |
@@ -59,7 +59,7 @@ The generic runtime SHALL compose screens through the following shell. The alert
 | Header | Renders service-neutral identity, connection, authentication, scope, refresh, and contextual action state |
 | Command/filter bar | Provides the shared `:` command and `/` filter input surface and returns its space to the page when inactive |
 | Page frame | Provides the shared title, border, loading, empty, forbidden, stale, and terminal-too-small presentation around active page content |
-| Resource table page | Renders descriptor-defined lists through one reusable selectable, sortable, filterable table component |
+| Resource table page | Renders descriptor-defined lists through one reusable selectable, sortable, filterable, horizontally scrollable table component |
 | Detail page | Renders readable fields through one reusable scrollable key-value component |
 | Stream page | Renders bounded event output and stream state through one reusable viewport component |
 | Breadcrumb/footer | Renders the actual navigation stack and globally applicable hints |
@@ -130,7 +130,7 @@ The runtime SHALL define semantic theme tokens for primary, secondary, normal, m
 
 ### Requirement: Centralized Responsive Layout
 
-One shared layout component SHALL calculate all shell and content dimensions from Bubble Tea window-size messages and deterministic named breakpoints. It SHALL expose full, compact, and terminal-too-small modes to child components. Compact mode SHALL hide optional header metadata, low-priority hints, and low-priority table columns before hiding active page identity, navigation, or the alert rail. Terminal-too-small mode SHALL render one shared explanatory state inside the shell and SHALL NOT panic, produce negative dimensions, or allow a child component to perform independent terminal-size arithmetic.
+One shared layout component SHALL calculate all shell and content dimensions from Bubble Tea window-size messages and deterministic named breakpoints. It SHALL expose full, compact, and terminal-too-small modes to child components. Compact mode SHALL hide optional header metadata and low-priority hints, then compress table columns to their shared minimums and expose horizontal overflow rather than remove declared columns solely because of terminal width. It SHALL NOT hide active page identity, navigation, overflow affordances, or the alert rail. Terminal-too-small mode SHALL render one shared explanatory state inside the shell and SHALL NOT panic, produce negative dimensions, or allow a child component to perform independent terminal-size arithmetic.
 
 #### Scenario: Cross responsive boundaries
 
@@ -172,6 +172,33 @@ All collection views SHALL use one reusable resource-table page backed by the Bu
 - WHEN the user switches between them
 - THEN the same resource-table component SHALL render both using their descriptors
 - AND neither view SHALL own a duplicated table setup, empty state, sorting function, or selection policy
+
+### Requirement: Content-Aware Column Sizing and Horizontal Overflow
+
+The shared resource-table component SHALL calculate column widths from sanitized terminal display cells rather than byte length, rune count, or equal division of the viewport. For each declared column, its natural width SHALL be the maximum display width of its header including active sort decoration and every value in the currently loaded unfiltered result, plus the shared inter-column gutter. The sizing pass SHALL correctly measure combining characters, wide Unicode characters, and emoji and SHALL remain stable while the user scrolls rows or changes a filter.
+
+One centralized sizing policy SHALL define and test semantic minimum widths, maximum widths, gutters, and expansion weights. Natural widths SHALL be clamped to those bounds. When bounded columns fit, unused space SHALL be distributed deterministically to eligible flexible text columns without needlessly expanding compact identifiers, statuses, booleans, or numbers. When they do not fit, lower-priority flexible columns SHALL shrink before higher-priority columns, but no declared column SHALL become inaccessible solely because of terminal width. Values wider than a column's maximum or current allocated width SHALL be truncated at a display-cell boundary with an ellipsis, while the complete sanitized value remains available in item detail.
+
+Any remaining overflow SHALL form one horizontal table canvas controlled by the keybinding registry. While the table has focus, Left and Right arrow keys SHALL move the viewport by one column boundary and SHALL NOT change row selection. Each navigation frame SHALL retain its horizontal offset across filtering, sorting, refresh, detail round trips, and back navigation; a newly opened resource view SHALL begin at its left edge, and resize SHALL clamp an invalid offset to the nearest valid boundary.
+
+The table chrome SHALL reserve non-data space for directional overflow indicators. A right indicator SHALL be visible whenever any column is fully or partially beyond the right edge, a left indicator SHALL be visible whenever content exists beyond the left edge, both SHALL be visible in the middle, and neither SHALL be visible when all columns fit. The indicators SHALL report the number of off-screen columns and SHALL be accompanied by a contextual `Left/Right: columns` hint from the shared keybinding registry. They SHALL NOT cover a header, cell value, scrollbar, breadcrumb, or alert.
+
+#### Scenario: Size heterogeneous fields by their content
+
+- GIVEN a table has a short numeric field, a medium identifier, a long free-text field, combining characters, CJK characters, and emoji
+- WHEN the table is rendered at a width where its bounded natural columns fit
+- THEN each width SHALL be based on sanitized terminal display cells across all loaded rows
+- AND compact scalar columns SHALL NOT receive the same width as the long flexible text column
+- AND row scrolling and filtering SHALL NOT cause column widths to jump
+
+#### Scenario: Reveal every overflowing column
+
+- GIVEN bounded table columns exceed the available page-frame width
+- WHEN the table first renders, moves right twice, reaches the right edge, moves left, and is resized
+- THEN only the right indicator SHALL appear at the left edge, both indicators SHALL appear in the middle, and only the left indicator SHALL appear at the right edge
+- AND each indicator SHALL accurately report its off-screen column count after movement and resize
+- AND each arrow press SHALL move exactly one column boundary without changing row selection
+- AND every declared column SHALL be reachable without hiding the breadcrumb footer or fixed alert rail
 
 ### Requirement: Shared Detail and Stream Pages
 
@@ -277,7 +304,7 @@ The header SHALL show refresh activity and the last successful refresh age. A pa
 
 ### Requirement: Presentation Component Conformance Gate
 
-The generated runtime SHALL have deterministic component tests for the full, compact, and terminal-too-small layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
+The generated runtime SHALL have deterministic component tests for the full, compact, and terminal-too-small layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
 
 #### Scenario: Prove one presentation system
 
@@ -361,7 +388,7 @@ The collection-operation form of `x-trex-tui` SHALL be an optional typed present
 | `columns` | ordered array | Explicit table columns in display order |
 | `columns[].property` | string | Readable scalar item property |
 | `columns[].label` | non-empty string | Column heading |
-| `columns[].priority` | integer | Relative retention priority when terminal width is constrained; higher values are retained first |
+| `columns[].priority` | integer | Relative resistance to width compression; higher values shrink after lower values without changing declared order or accessibility |
 
 ```yaml
 x-trex-tui:
@@ -385,7 +412,8 @@ Aliases SHALL match `[a-z][a-z0-9-]*`. The generator SHALL reject a recognized f
 - GIVEN a collection operation declares a label, alias, identity property, default sort property, and ordered columns
 - WHEN the TUI descriptor is generated
 - THEN it SHALL preserve the declared column order and labels
-- AND it SHALL use priority only to choose which columns are hidden as available width shrinks
+- AND it SHALL use priority only to order compression as available width shrinks
+- AND every declared column SHALL remain reachable through horizontal scrolling
 - AND the extension SHALL NOT change the operation's route, relationship, capability, or security state
 
 #### Scenario: Reject a misspelled property
@@ -655,6 +683,7 @@ Continuous integration SHALL run the TUI generator against the fully resolved re
 | Fixed bottom alert rail | Errors remain spatially predictable across pages, modes, dialogs, and responsive layouts while inline field and fatal context remain available |
 | One keybinding registry | Dispatch, contextual hints, generated hotkeys, conflict validation, and help cannot silently disagree |
 | Central theme and responsive layout | Semantic tokens and one measurement authority eliminate ad hoc styling and conflicting terminal arithmetic |
+| Content-sized columns with signaled horizontal overflow | Natural display-cell widths preserve information density, bounded compression handles constrained terminals, and directional indicators make every off-screen column discoverable through arrow-key scrolling |
 | Modal schema-driven forms | Descriptor inputs can share validation, focus, cancellation, and in-flight behavior without operation-specific form code |
 | Five-second skip-on-inflight refresh | Timely defaults avoid overlapping requests; interval `0` permits deliberate opt-out and stale content remains usable on failure |
 | API-only data path | The generated TUI works against documented REST operations and does not couple to a database, Kubernetes, or server internals |
