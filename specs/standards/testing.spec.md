@@ -4,7 +4,7 @@
 **Status:** Active
 **ID:** STD-003
 **Related:** [Entity Lifecycle](../framework/entity-lifecycle.spec.md), [Secrets Management](../security/secrets-management.spec.md)
-**Implements:** `test/`, `plugins/*/integration_test.go`, `plugins/*/grpc_integration_test.go`, `plugins/*/factory_test.go`, `.github/workflows/trex-pr-ci.yml`, `.github/workflows/trex-auto-review.yml`, `scripts/test_trex_review_workflows.py`
+**Implements:** `Makefile`, `.tekton/`, `test/`, `cmd/trex/environments/framework_test.go`, `plugins/*/integration_test.go`, `plugins/*/grpc_integration_test.go`, `plugins/*/factory_test.go`, `.github/workflows/trex-pr-ci.yml`, `.github/workflows/trex-auto-review.yml`, `scripts/test_trex_review_workflows.py`
 
 ---
 
@@ -20,16 +20,39 @@ Unit tests and integration tests SHALL be separated by environment and execution
 
 #### Scenario: Unit tests
 - GIVEN `make test` is executed
-- WHEN unit tests run with `OCM_ENV=unit_testing`
+- WHEN unit tests run with `API_ENV=unit_testing`
 - THEN only `./pkg/...` and `./cmd/...` SHALL be tested
 - AND NO database connection SHALL be required
 - AND mock DAOs SHALL be used for all data access
 
 #### Scenario: Integration tests
 - GIVEN `make test-integration` is executed
-- WHEN integration tests run with `OCM_ENV=integration_testing`
+- WHEN integration tests run with `API_ENV=integration_testing`
 - THEN a real PostgreSQL database SHALL be available via testcontainers
 - AND full CRUD operations SHALL be tested against the database
+
+### Requirement: Isolated Reproducible Test Runner
+
+All repository test targets and CI jobs SHALL use a version-pinned `gotestsum` without adding test tooling to the root application module graph.
+
+#### Scenario: Test from a clean environment
+- GIVEN the repository has been checked out on a host without `gotestsum` installed on `PATH`
+- WHEN `make test`, `make ci-test-unit`, `make test-integration`, or `make ci-test-integration` is executed
+- THEN the target SHALL invoke a repository-controlled `gotestsum` version through an isolated `go run gotest.tools/gotestsum@<version>` command
+- AND the root `go.mod` SHALL NOT require `gotest.tools/gotestsum` or its tool-only dependencies
+- AND CI SHALL NOT install an unpinned `gotestsum@latest`
+
+### Requirement: Hermetic Unit Test Credentials
+
+Unit tests that initialize file-backed configuration SHALL own temporary, non-production credential fixtures.
+
+#### Scenario: Unit test without a repository password file
+- GIVEN `secrets/db.password` does not exist
+- WHEN `make test` or `make ci-test-unit` is executed
+- THEN configuration-initialization tests SHALL use a temporary database password file with owner-only permissions
+- AND the temporary file SHALL be removed by the test framework
+- AND the test run SHALL NOT create `secrets/db.password`
+- AND NO database connection SHALL be required
 
 ### Requirement: Testcontainers Integration
 
@@ -140,6 +163,8 @@ The repository SHALL have an offline automated test that validates the event tri
 | Tests co-located with plugin code | Tests live next to the code they test; easy to navigate |
 | TestMain for lifecycle management | Standard Go pattern; controls setup/teardown for entire package |
 | Separate unit and integration commands | Unit tests are fast (no DB); integration tests are thorough |
+| Version-pinned isolated `go run` for `gotestsum` | Reproducible local and CI output without a global install or pollution of the dependency graph inherited by downstream consumers |
+| Temporary unit-test credentials | Exercises file-backed configuration while keeping ignored workspace secrets optional and avoiding real credentials |
 | Two-stage pull request automation | Untrusted code can be tested while comment writes remain confined to trusted default-branch logic |
 | API-only privileged review | Patch analysis and comment updates do not require checking out or executing fork-controlled content |
 | Marker-owned comment updates | One auditable bot comment reflects the latest run without notification spam |

@@ -5,6 +5,16 @@ CGO_ENABLED := 1
 
 # Enable users to override the golang used to accomodate custom installations
 GO ?= go
+GOPATH ?= $(shell $(GO) env GOPATH)
+
+# Pin test tooling without adding it to the application module graph.
+GOTESTSUM_VERSION := v1.13.0
+GOTESTSUM ?= $(GO) run gotest.tools/gotestsum@$(GOTESTSUM_VERSION)
+
+# Generator acceptance runs JavaScript tooling in one immutable, known-good
+# image instead of installing Node.js or npm on the host.
+NODE_TEST_IMAGE := registry.access.redhat.com/ubi9/nodejs-20:1-1778648167@sha256:74cc7b1d13592b1e425074f434b90e470ab209da85fd1fdb8e6e9e4cabaec51a
+TYPESCRIPT_VERSION := 5.3.3
 
 # Allow overriding `oc` command.
 # Used by pr_check.py to ssh deploy inside private Hive cluster via bastion host.
@@ -73,6 +83,7 @@ help:
 	@echo "make run                  run the application"
 	@echo "make run/docs             run swagger and host the api spec"
 	@echo "make test                 run unit tests"
+	@echo "make dependency-age       enforce the 14-day dependency cooldown"
 	@echo "make test-integration     run integration tests"
 	@echo "make generate             generate openapi modules"
 	@echo "make image                build docker image"
@@ -186,11 +197,42 @@ install: check-gopath
 #
 # Examples:
 #   make test TESTFLAGS="-run TestSomething"
-test: install
-	API_ENV=unit_testing gotestsum --format short-verbose -- -p 1 -v $(TESTFLAGS) \
+test: install test-dependency-policy
+	API_ENV=unit_testing $(GOTESTSUM) --format short-verbose -- -p 1 -v $(TESTFLAGS) \
 		./pkg/... \
 		./cmd/...
+	$(MAKE) test-generators
 .PHONY: test
+
+# Fast, offline tests for dependency manifest parsing and policy boundaries.
+test-dependency-policy:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_dependency_age.py
+.PHONY: test-dependency-policy
+
+# Live dependency admission check. This intentionally fails closed when the Go
+# proxy or npm registry cannot establish a publish timestamp.
+dependency-age: test-dependency-policy
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check-dependency-age.py --min-age-days 14
+.PHONY: dependency-age
+
+# Compile and test the canonical OpenAPI IR and every in-repository consumer as
+# one atomic contract. Consumer suites generate into isolated temporary roots
+# and run their target-specific acceptance checks.
+test-generators:
+	@for module in \
+		scripts/openapi-ir \
+		scripts/sdk-generator \
+		scripts/cli-generator \
+		scripts/console-plugin-generator; do \
+			echo "Testing $$module"; \
+			(cd "$$module" && \
+				GOWORK=off \
+				TREX_CONTAINER_TOOL="$(container_tool)" \
+				TREX_NODE_IMAGE="$(NODE_TEST_IMAGE)" \
+				TREX_TYPESCRIPT_VERSION="$(TYPESCRIPT_VERSION)" \
+				$(GOTESTSUM) --format short-verbose -- ./...) || exit 1; \
+	done
+.PHONY: test-generators
 
 # Runs the unit tests with json output
 #
@@ -199,11 +241,11 @@ test: install
 #
 # Examples:
 #   make test-unit-json TESTFLAGS="-run TestSomething"
-ci-test-unit: install
-	@echo $(db_password) > ${PWD}/secrets/db.password
-	API_ENV=unit_testing gotestsum --jsonfile-timing-events=$(unit_test_json_output) --format short-verbose -- -p 1 -v $(TESTFLAGS) \
+ci-test-unit: install dependency-age
+	API_ENV=unit_testing $(GOTESTSUM) --jsonfile-timing-events=$(unit_test_json_output) --format short-verbose -- -p 1 -v $(TESTFLAGS) \
 		./pkg/... \
 		./cmd/...
+	$(MAKE) test-generators
 .PHONY: ci-test-unit
 
 # Runs the integration tests.
@@ -218,7 +260,7 @@ ci-test-unit: install
 #   make test-integration TESTFLAGS="-short"                skips long-run tests
 ci-test-integration: install
 	@echo $(db_password) > ${PWD}/secrets/db.password
-	API_ENV=integration_testing gotestsum --jsonfile-timing-events=$(integration_test_json_output) --format $(TEST_SUMMARY_FORMAT) -- -p 1 -ldflags -s -v -timeout 1h $(TESTFLAGS) \
+	API_ENV=integration_testing $(GOTESTSUM) --jsonfile-timing-events=$(integration_test_json_output) --format $(TEST_SUMMARY_FORMAT) -- -p 1 -ldflags -s -v -timeout 1h $(TESTFLAGS) \
 			./test/integration \
 			./plugins/...
 .PHONY: ci-test-integration
@@ -235,7 +277,7 @@ ci-test-integration: install
 #   make test-integration TESTFLAGS="-short"                skips long-run tests
 test-integration: install
 	@echo $(db_password) > ${PWD}/secrets/db.password
-	API_ENV=integration_testing gotestsum --format $(TEST_SUMMARY_FORMAT) -- -p 1 -ldflags -s -v -timeout 1h $(TESTFLAGS) \
+	API_ENV=integration_testing $(GOTESTSUM) --format $(TEST_SUMMARY_FORMAT) -- -p 1 -ldflags -s -v -timeout 1h $(TESTFLAGS) \
 			./test/integration \
 			./plugins/...
 .PHONY: test-integration
