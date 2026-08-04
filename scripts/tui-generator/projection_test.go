@@ -85,6 +85,9 @@ func TestNavigationProjectionGraphConformance(t *testing.T) {
 	if gap := requiredProjectionInputs(*archive); !reflect.DeepEqual(gap, []string{"header:X-Reason", "query:notify"}) {
 		t.Fatalf("action required inputs = %#v", gap)
 	}
+	if parameter := operationParameter(archive, "notify"); parameter == nil || parameter.Style != "form" || !parameter.Explode || !parameter.AllowReserved {
+		t.Fatalf("query serialization metadata was not preserved: %#v", parameter)
+	}
 }
 
 func TestSharedIRConformanceFixtureProjection(t *testing.T) {
@@ -273,6 +276,15 @@ func operationByID(t *testing.T, descriptor tui.Descriptor, id string) *tui.Oper
 		t.Fatalf("operation %s not found", id)
 	}
 	return operation
+}
+
+func operationParameter(operation *tui.Operation, name string) *tui.Parameter {
+	for index := range operation.Parameters {
+		if operation.Parameters[index].Name == name {
+			return &operation.Parameters[index]
+		}
+	}
+	return nil
 }
 
 func edgeBetween(t *testing.T, descriptor tui.Descriptor, source, target string) *tui.Edge {

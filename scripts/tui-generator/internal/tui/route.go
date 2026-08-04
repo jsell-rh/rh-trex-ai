@@ -27,90 +27,220 @@ func BuildPath(operation Operation, values map[string]any) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("operation %s lacks path parameter %s", operation.ID, part.Parameter)
 		}
-		value, ok := values[part.Parameter]
+		value, ok := operationParameterValue(operation, parameter, values)
 		if !ok {
 			return "", fmt.Errorf("operation %s requires path parameter %s", operation.ID, part.Parameter)
 		}
-		serialized, err := serializeSimple(parameter, value)
+		serialized, err := serializePath(parameter, value)
 		if err != nil {
 			return "", fmt.Errorf("operation %s path parameter %s: %w", operation.ID, part.Parameter, err)
 		}
-		path.WriteString(url.PathEscape(serialized))
+		path.WriteString(serialized)
 	}
 	return path.String(), nil
 }
 
-func BuildQueryAndHeaders(operation Operation, values map[string]any) (url.Values, map[string]string, error) {
-	query := make(url.Values)
+func BuildQueryAndHeaders(operation Operation, values map[string]any) (string, map[string]string, error) {
+	var query []queryPair
 	headers := make(map[string]string)
 	for _, parameter := range operation.Parameters {
 		if parameter.In != "query" && parameter.In != "header" {
 			continue
 		}
-		value, present := values[parameter.Name]
+		value, present := operationParameterValue(operation, parameter, values)
 		if !present {
 			if parameter.Required {
-				return nil, nil, fmt.Errorf("operation %s requires %s parameter %s", operation.ID, parameter.In, parameter.Name)
+				return "", nil, fmt.Errorf("operation %s requires %s parameter %s", operation.ID, parameter.In, parameter.Name)
 			}
 			continue
 		}
 		if err := validateParameter(parameter, value); err != nil {
-			return nil, nil, fmt.Errorf("operation %s %s parameter %s: %w", operation.ID, parameter.In, parameter.Name, err)
+			return "", nil, fmt.Errorf("operation %s %s parameter %s: %w", operation.ID, parameter.In, parameter.Name, err)
 		}
 		if parameter.In == "header" {
 			serialized, err := serializeSimple(parameter, value)
 			if err != nil {
-				return nil, nil, err
+				return "", nil, err
 			}
 			if strings.ContainsAny(serialized, "\r\n") {
-				return nil, nil, fmt.Errorf("header value contains a line break")
+				return "", nil, fmt.Errorf("header value contains a line break")
 			}
 			headers[parameter.Name] = serialized
 			continue
 		}
-		if err := serializeQuery(query, parameter, value); err != nil {
-			return nil, nil, err
+		var err error
+		query, err = serializeQuery(query, parameter, value)
+		if err != nil {
+			return "", nil, err
 		}
 	}
-	return query, headers, nil
+	return encodeQuery(query), headers, nil
 }
 
-func serializeQuery(result url.Values, parameter Parameter, value any) error {
+// ParameterValueKey returns the collision-safe key for a parameter value in a
+// RequestInput.Values map. Bare parameter names remain accepted only when the
+// operation has no same-named parameter in another location; bare path values
+// are also accepted for navigation bindings created by older descriptors.
+func ParameterValueKey(location, name string) string {
+	return location + "\x00" + name
+}
+
+func operationParameterValue(operation Operation, parameter Parameter, values map[string]any) (any, bool) {
+	if value, ok := values[ParameterValueKey(parameter.In, parameter.Name)]; ok {
+		return value, true
+	}
+	duplicates := 0
+	for _, candidate := range operation.Parameters {
+		if candidate.Name == parameter.Name {
+			duplicates++
+		}
+	}
+	value, ok := values[parameter.Name]
+	if !ok || (duplicates > 1 && parameter.In != "path") {
+		return nil, false
+	}
+	return value, true
+}
+
+type queryPair struct {
+	name          string
+	value         string
+	allowReserved bool
+}
+
+func serializeQuery(result []queryPair, parameter Parameter, value any) ([]queryPair, error) {
+	add := func(name, value string) {
+		result = append(result, queryPair{name: name, value: value, allowReserved: parameter.AllowReserved})
+	}
 	switch typed := value.(type) {
 	case []any:
 		parts := scalarSlice(typed)
 		if parameter.Style == "spaceDelimited" {
-			result.Set(parameter.Name, strings.Join(parts, " "))
+			add(parameter.Name, strings.Join(parts, " "))
 		} else if parameter.Style == "pipeDelimited" {
-			result.Set(parameter.Name, strings.Join(parts, "|"))
+			add(parameter.Name, strings.Join(parts, "|"))
 		} else if parameter.Explode {
 			for _, part := range parts {
-				result.Add(parameter.Name, part)
+				add(parameter.Name, part)
 			}
 		} else {
-			result.Set(parameter.Name, strings.Join(parts, ","))
+			add(parameter.Name, strings.Join(parts, ","))
 		}
 	case map[string]any:
 		keys := sortedAnyKeys(typed)
 		if parameter.Style == "deepObject" {
 			for _, key := range keys {
-				result.Set(parameter.Name+"["+key+"]", scalarString(typed[key]))
+				add(parameter.Name+"["+key+"]", scalarString(typed[key]))
 			}
 		} else if parameter.Explode {
 			for _, key := range keys {
-				result.Set(key, scalarString(typed[key]))
+				add(key, scalarString(typed[key]))
 			}
 		} else {
 			var parts []string
 			for _, key := range keys {
 				parts = append(parts, key, scalarString(typed[key]))
 			}
-			result.Set(parameter.Name, strings.Join(parts, ","))
+			add(parameter.Name, strings.Join(parts, ","))
 		}
 	default:
-		result.Set(parameter.Name, scalarString(typed))
+		add(parameter.Name, scalarString(typed))
 	}
-	return nil
+	return result, nil
+}
+
+func encodeQuery(pairs []queryPair) string {
+	var result strings.Builder
+	for index, pair := range pairs {
+		if index > 0 {
+			result.WriteByte('&')
+		}
+		result.WriteString(url.QueryEscape(pair.name))
+		result.WriteByte('=')
+		result.WriteString(encodeQueryValue(pair.value, pair.allowReserved))
+	}
+	return result.String()
+}
+
+func encodeQueryValue(value string, allowReserved bool) string {
+	encoded := url.QueryEscape(value)
+	if !allowReserved {
+		return encoded
+	}
+	for _, character := range ":/?#[]@!$&'()*+,;=" {
+		escaped := url.QueryEscape(string(character))
+		encoded = strings.ReplaceAll(encoded, escaped, string(character))
+	}
+	return encoded
+}
+
+func serializePath(parameter Parameter, value any) (string, error) {
+	if err := validateParameter(parameter, value); err != nil {
+		return "", err
+	}
+	style := parameter.Style
+	if style == "" {
+		style = "simple"
+	}
+	scalar := func(value any) string { return url.PathEscape(scalarString(value)) }
+	switch typed := value.(type) {
+	case []any:
+		values := make([]string, len(typed))
+		for index, item := range typed {
+			values[index] = scalar(item)
+		}
+		switch style {
+		case "simple":
+			return strings.Join(values, ","), nil
+		case "label":
+			separator := ","
+			if parameter.Explode {
+				separator = "."
+			}
+			return "." + strings.Join(values, separator), nil
+		case "matrix":
+			if parameter.Explode {
+				return ";" + parameter.Name + "=" + strings.Join(values, ";"+parameter.Name+"="), nil
+			}
+			return ";" + parameter.Name + "=" + strings.Join(values, ","), nil
+		}
+	case map[string]any:
+		keys := sortedAnyKeys(typed)
+		var pairs []string
+		for _, key := range keys {
+			encodedKey, encodedValue := scalar(key), scalar(typed[key])
+			if parameter.Explode {
+				pairs = append(pairs, encodedKey+"="+encodedValue)
+			} else {
+				pairs = append(pairs, encodedKey, encodedValue)
+			}
+		}
+		switch style {
+		case "simple":
+			return strings.Join(pairs, ","), nil
+		case "label":
+			separator := ","
+			if parameter.Explode {
+				separator = "."
+			}
+			return "." + strings.Join(pairs, separator), nil
+		case "matrix":
+			if parameter.Explode {
+				return ";" + strings.Join(pairs, ";"), nil
+			}
+			return ";" + parameter.Name + "=" + strings.Join(pairs, ","), nil
+		}
+	default:
+		switch style {
+		case "simple":
+			return scalar(typed), nil
+		case "label":
+			return "." + scalar(typed), nil
+		case "matrix":
+			return ";" + parameter.Name + "=" + scalar(typed), nil
+		}
+	}
+	return "", fmt.Errorf("unsupported path style %q", style)
 }
 
 func serializeSimple(parameter Parameter, value any) (string, error) {
@@ -139,6 +269,10 @@ func serializeSimple(parameter Parameter, value any) (string, error) {
 func validateParameter(parameter Parameter, value any) error {
 	text := scalarString(value)
 	switch parameter.Type {
+	case "string":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("must be a string")
+		}
 	case "integer":
 		if _, err := strconv.ParseInt(text, 10, 64); err != nil {
 			return fmt.Errorf("must be an integer")
@@ -150,6 +284,14 @@ func validateParameter(parameter Parameter, value any) error {
 	case "boolean":
 		if _, err := strconv.ParseBool(text); err != nil {
 			return fmt.Errorf("must be a boolean")
+		}
+	case "array":
+		if _, ok := value.([]any); !ok {
+			return fmt.Errorf("must be an array")
+		}
+	case "object":
+		if _, ok := value.(map[string]any); !ok {
+			return fmt.Errorf("must be an object")
 		}
 	}
 	if parameter.Pattern != "" {

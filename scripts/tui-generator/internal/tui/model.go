@@ -46,13 +46,20 @@ const (
 	modeSwitch
 	modeRelationships
 	modeActions
+	modeActionInput
 	modeDetail
 )
 
 const (
 	maxVisibleStreamEvents = 500
 	maxVisibleStreamBytes  = 1 << 20
+	maxActionInputBytes    = 64 << 10
 )
+
+type actionPrompt struct {
+	Parameter *Parameter
+	Body      bool
+}
 
 type Model struct {
 	descriptor       Descriptor
@@ -74,7 +81,10 @@ type Model struct {
 	loading          bool
 	chosenEdges      []Edge
 	chosenOperations []Operation
-	chosenActionGaps []string
+	actionOperation  Operation
+	actionPrompts    []actionPrompt
+	actionPrompt     int
+	actionRequest    RequestInput
 	streamCancel     context.CancelFunc
 	streamEvents     <-chan streamEvent
 	streamLines      []string
@@ -203,6 +213,8 @@ func (model *Model) View() string {
 		body = model.table.View() + "\n:" + model.input.View()
 	case modeRelationships, modeActions:
 		body = model.chooser.View()
+	case modeActionInput:
+		body = model.actionInputView()
 	case modeDetail:
 		body = model.detail.View()
 	default:
@@ -224,6 +236,9 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if model.mode == modeFilter || model.mode == modeSwitch {
 		return model.handleInputKey(key)
+	}
+	if model.mode == modeActionInput {
+		return model.handleActionInputKey(key)
 	}
 	if model.mode == modeRelationships || model.mode == modeActions {
 		return model.handleChooserKey(key)
@@ -249,11 +264,13 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "/":
 		model.mode = modeFilter
+		model.input.CharLimit = 256
 		model.input.SetValue(model.filter)
 		model.input.Focus()
 		return model, textinput.Blink
 	case ":":
 		model.mode = modeSwitch
+		model.input.CharLimit = 256
 		model.input.SetValue("")
 		model.input.Focus()
 		return model, textinput.Blink
@@ -332,14 +349,8 @@ func (model *Model) handleChooserKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return model.pushEdge(edge)
 		}
 		if model.mode == modeActions && index < len(model.chosenOperations) {
-			if index < len(model.chosenActionGaps) && model.chosenActionGaps[index] != "" {
-				model.status = "Action unavailable: " + model.chosenActionGaps[index]
-				model.mode = modeBrowse
-				return model, nil
-			}
 			operation := model.chosenOperations[index]
-			model.mode = modeBrowse
-			return model, model.executeAction(operation)
+			return model.beginAction(operation)
 		}
 	}
 	var command tea.Cmd
@@ -440,7 +451,6 @@ func (model *Model) openActions() (tea.Model, tea.Cmd) {
 	}
 	sort.Slice(operations, func(i, j int) bool { return operations[i].ID < operations[j].ID })
 	model.chosenOperations = operations
-	model.chosenActionGaps = make([]string, 0, len(operations))
 	rows := make([]table.Row, 0, len(operations))
 	values := cloneBindings(model.frames[len(model.frames)-1].Bindings)
 	for _, operation := range operations {
@@ -448,25 +458,158 @@ func (model *Model) openActions() (tea.Model, tea.Cmd) {
 		if label == "" {
 			label = operation.ID
 		}
-		gap := requiredInputGap(operation, values)
-		model.chosenActionGaps = append(model.chosenActionGaps, gap)
 		state := operation.Method
-		if gap != "" {
-			state = "disabled: " + gap
+		if count := actionInputCount(operation, values); count > 0 {
+			state += fmt.Sprintf(" · %d input(s)", count)
 		}
 		rows = append(rows, table.Row{SanitizeCell(label), SanitizeCell(state)})
 	}
-	model.chooser = newChooser([]table.Column{{Title: "ACTION", Width: 38}, {Title: "METHOD / AVAILABILITY", Width: 46}}, rows)
+	model.chooser = newChooser([]table.Column{{Title: "ACTION", Width: 38}, {Title: "METHOD / INPUTS", Width: 46}}, rows)
 	model.mode = modeActions
 	return model, nil
 }
 
-func (model *Model) executeAction(operation Operation) tea.Cmd {
-	if containsString(operation.Capabilities, "stream") {
-		return model.openStream(operation)
-	}
+func (model *Model) beginAction(operation Operation) (tea.Model, tea.Cmd) {
 	values := cloneBindings(model.frames[len(model.frames)-1].Bindings)
-	return model.execute(operation, RequestInput{Values: values})
+	for _, parameter := range operation.Parameters {
+		if parameter.In != "path" {
+			continue
+		}
+		if value, present := values[parameter.Name]; present {
+			values[ParameterValueKey(parameter.In, parameter.Name)] = value
+		}
+	}
+	model.actionOperation = operation
+	model.actionRequest = RequestInput{Values: values}
+	model.actionPrompts = nil
+	model.actionPrompt = 0
+	for index := range operation.Parameters {
+		parameter := &operation.Parameters[index]
+		if value, present := operationParameterValue(operation, *parameter, values); present && strings.TrimSpace(scalarString(value)) != "" {
+			continue
+		}
+		model.actionPrompts = append(model.actionPrompts, actionPrompt{Parameter: parameter})
+	}
+	if operation.RequestBody != nil {
+		model.actionPrompts = append(model.actionPrompts, actionPrompt{Body: true})
+	}
+	if len(model.actionPrompts) == 0 {
+		model.mode = modeBrowse
+		return model, model.executeAction(operation, model.actionRequest)
+	}
+	model.mode = modeActionInput
+	model.status = ""
+	model.input.CharLimit = maxActionInputBytes
+	model.input.SetValue("")
+	model.input.Focus()
+	return model, textinput.Blink
+}
+
+func (model *Model) actionInputView() string {
+	if model.actionPrompt >= len(model.actionPrompts) {
+		return "Preparing request…"
+	}
+	prompt := model.actionPrompts[model.actionPrompt]
+	required := false
+	description := ""
+	if prompt.Body {
+		required = model.actionOperation.RequestBody != nil && model.actionOperation.RequestBody.Required
+		description = "JSON request body"
+		if model.actionOperation.RequestBody != nil && model.actionOperation.RequestBody.ContentType != "" {
+			description += " (" + model.actionOperation.RequestBody.ContentType + ")"
+		}
+	} else if prompt.Parameter != nil {
+		required = prompt.Parameter.Required
+		description = prompt.Parameter.In + " parameter " + prompt.Parameter.Name
+		if prompt.Parameter.Type != "" {
+			description += " (" + prompt.Parameter.Type + ")"
+		}
+	}
+	necessity := "optional; Enter skips"
+	if required {
+		necessity = "required"
+	}
+	return fmt.Sprintf("%s\nInput %d/%d — %s — %s\n> %s", SanitizeCell(actionLabel(model.actionOperation)), model.actionPrompt+1, len(model.actionPrompts), SanitizeCell(description), necessity, model.input.View())
+}
+
+func (model *Model) handleActionInputKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.String() == "esc" {
+		model.input.Blur()
+		model.mode = modeBrowse
+		model.status = "Action canceled"
+		return model, nil
+	}
+	if key.String() != "enter" {
+		var command tea.Cmd
+		model.input, command = model.input.Update(key)
+		return model, command
+	}
+	prompt := model.actionPrompts[model.actionPrompt]
+	value := strings.TrimSpace(model.input.Value())
+	if prompt.Body {
+		if value == "" && model.actionOperation.RequestBody != nil && model.actionOperation.RequestBody.Required {
+			model.status = "A JSON request body is required"
+			return model, nil
+		}
+		body := []byte(value)
+		if err := validateRequestBody(model.actionOperation, body); err != nil {
+			model.status = SanitizeCell(err.Error())
+			return model, nil
+		}
+		model.actionRequest.Body = body
+	} else if prompt.Parameter != nil {
+		if value == "" {
+			if prompt.Parameter.Required {
+				model.status = fmt.Sprintf("%s parameter %s is required", prompt.Parameter.In, prompt.Parameter.Name)
+				return model, nil
+			}
+		} else {
+			parsed, err := parseParameterInput(*prompt.Parameter, value)
+			if err != nil {
+				model.status = SanitizeCell(err.Error())
+				return model, nil
+			}
+			model.actionRequest.Values[ParameterValueKey(prompt.Parameter.In, prompt.Parameter.Name)] = parsed
+		}
+	}
+	model.actionPrompt++
+	model.status = ""
+	model.input.SetValue("")
+	if model.actionPrompt < len(model.actionPrompts) {
+		return model, nil
+	}
+	model.input.Blur()
+	model.mode = modeBrowse
+	return model, model.executeAction(model.actionOperation, model.actionRequest)
+}
+
+func parseParameterInput(parameter Parameter, value string) (any, error) {
+	if parameter.Type != "array" && parameter.Type != "object" {
+		if err := validateParameter(parameter, value); err != nil {
+			return nil, fmt.Errorf("%s parameter %s: %w", parameter.In, parameter.Name, err)
+		}
+		return value, nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.UseNumber()
+	var parsed any
+	if err := decoder.Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("%s parameter %s must be valid JSON: %w", parameter.In, parameter.Name, err)
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return nil, fmt.Errorf("%s parameter %s must contain one JSON value: %w", parameter.In, parameter.Name, err)
+	}
+	if err := validateParameter(parameter, parsed); err != nil {
+		return nil, fmt.Errorf("%s parameter %s: %w", parameter.In, parameter.Name, err)
+	}
+	return parsed, nil
+}
+
+func (model *Model) executeAction(operation Operation, input RequestInput) tea.Cmd {
+	if containsString(operation.Capabilities, "stream") {
+		return model.openStream(operation, input)
+	}
+	return model.execute(operation, input)
 }
 
 func (model *Model) loadCurrent() tea.Cmd {
@@ -489,7 +632,7 @@ func (model *Model) loadCurrent() tea.Cmd {
 	if len(view.StreamOperationIDs) > 0 {
 		operation := model.descriptor.Operation(view.StreamOperationIDs[0])
 		if operation != nil {
-			return model.openStream(*operation)
+			return model.openStream(*operation, RequestInput{Values: cloneBindings(model.frames[len(model.frames)-1].Bindings)})
 		}
 	}
 	model.status = "View has no executable read operation"
@@ -505,13 +648,12 @@ func (model *Model) execute(operation Operation, input RequestInput) tea.Cmd {
 	}
 }
 
-func (model *Model) openStream(operation Operation) tea.Cmd {
+func (model *Model) openStream(operation Operation, input RequestInput) tea.Cmd {
 	model.cancelStream()
 	ctx, cancel := context.WithCancel(context.Background())
 	model.streamCancel = cancel
 	model.loading = true
 	viewID := model.frames[len(model.frames)-1].TargetViewID
-	input := RequestInput{Values: cloneBindings(model.frames[len(model.frames)-1].Bindings)}
 	return func() tea.Msg {
 		response, err := model.client.OpenStream(ctx, operation, input)
 		if err != nil {
@@ -991,25 +1133,25 @@ func pumpStream(ctx context.Context, reader io.ReadCloser, contentType string, e
 	}
 }
 
-func requiredInputGap(operation Operation, values map[string]any) string {
-	var missing []string
+func actionInputCount(operation Operation, values map[string]any) int {
+	count := 0
 	for _, parameter := range operation.Parameters {
-		if !parameter.Required {
-			continue
-		}
-		value, ok := values[parameter.Name]
+		value, ok := operationParameterValue(operation, parameter, values)
 		if !ok || strings.TrimSpace(scalarString(value)) == "" {
-			missing = append(missing, parameter.In+" "+parameter.Name)
+			count++
 		}
 	}
-	if operation.RequestBody != nil && operation.RequestBody.Required {
-		missing = append(missing, "request body")
+	if operation.RequestBody != nil {
+		count++
 	}
-	if len(missing) == 0 {
-		return ""
+	return count
+}
+
+func actionLabel(operation Operation) string {
+	if strings.TrimSpace(operation.Summary) != "" {
+		return operation.Summary
 	}
-	sort.Strings(missing)
-	return "requires " + strings.Join(missing, ", ")
+	return operation.ID
 }
 
 func availableBindings(frames []Frame) map[string]any {

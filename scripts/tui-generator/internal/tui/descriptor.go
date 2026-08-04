@@ -79,14 +79,15 @@ type PathPart struct {
 }
 
 type Parameter struct {
-	Name     string `json:"name"`
-	In       string `json:"in"`
-	Required bool   `json:"required"`
-	Style    string `json:"style"`
-	Explode  bool   `json:"explode"`
-	Type     string `json:"type,omitempty"`
-	Format   string `json:"format,omitempty"`
-	Pattern  string `json:"pattern,omitempty"`
+	Name          string `json:"name"`
+	In            string `json:"in"`
+	Required      bool   `json:"required"`
+	Style         string `json:"style"`
+	Explode       bool   `json:"explode"`
+	AllowReserved bool   `json:"allowReserved,omitempty"`
+	Type          string `json:"type,omitempty"`
+	Format        string `json:"format,omitempty"`
+	Pattern       string `json:"pattern,omitempty"`
 }
 
 type RequestBody struct {

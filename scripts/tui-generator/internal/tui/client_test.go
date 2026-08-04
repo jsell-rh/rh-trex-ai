@@ -241,3 +241,87 @@ func TestSuccessStatusRange(t *testing.T) {
 		t.Fatal("OpenAPI response status range matching is incorrect")
 	}
 }
+
+func TestPathStylesAndAllowReservedConstructExactRequest(t *testing.T) {
+	requests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests <- request.URL.EscapedPath() + "?" + request.URL.RawQuery
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{}`)
+	}))
+	defer server.Close()
+	client, err := NewClient(Descriptor{Servers: []Server{{URL: server.URL}}}, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := Operation{
+		ID: "styledRequest", Method: http.MethodGet,
+		PathParts: []PathPart{{Literal: "/things/"}, {Parameter: "colors"}, {Literal: "/"}, {Parameter: "attributes"}},
+		Parameters: []Parameter{
+			{Name: "colors", In: "path", Required: true, Style: "label", Explode: true, Type: "array"},
+			{Name: "attributes", In: "path", Required: true, Style: "matrix", Explode: true, Type: "object"},
+			{Name: "raw", In: "query", Style: "form", Type: "string", AllowReserved: true},
+			{Name: "encoded", In: "query", Style: "form", Type: "string"},
+		},
+		Response: ResponseShape{ContentType: "application/json"}, SuccessStatuses: []string{"200"}, Security: EffectiveSecurity{None: true},
+	}
+	value := "a/b?c=d:tag,@!$'()*+;"
+	_, err = client.Execute(context.Background(), operation, RequestInput{Values: map[string]any{
+		"colors":     []any{"red", "blue/green"},
+		"attributes": map[string]any{"role": "admin/user", "name": "A B"},
+		"raw":        value, "encoded": value,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := <-requests
+	want := "/things/.red.blue%2Fgreen/;name=A%20B;role=admin%2Fuser?" +
+		"raw=a/b?c=d:tag,@!$'()*+;&encoded=a%2Fb%3Fc%3Dd%3Atag%2C%40%21%24%27%28%29%2A%2B%3B"
+	if request != want {
+		t.Fatalf("styled request = %q, want %q", request, want)
+	}
+}
+
+func TestSameNamedParametersRemainLocationAware(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		if request.URL.EscapedPath() != "/items/path-value" || request.URL.RawQuery != "id=query-value" || request.Header.Get("id") != "header-value" {
+			t.Errorf("colliding parameters serialized as path=%q query=%q header=%q", request.URL.EscapedPath(), request.URL.RawQuery, request.Header.Get("id"))
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{}`)
+	}))
+	defer server.Close()
+	client, err := NewClient(Descriptor{Servers: []Server{{URL: server.URL}}}, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := Operation{
+		ID: "collision", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/items/"}, {Parameter: "id"}},
+		Parameters: []Parameter{
+			{Name: "id", In: "path", Required: true, Style: "simple", Type: "string"},
+			{Name: "id", In: "query", Required: true, Style: "form", Type: "string"},
+			{Name: "id", In: "header", Required: true, Style: "simple", Type: "string"},
+		},
+		Response: ResponseShape{ContentType: "application/json"}, SuccessStatuses: []string{"200"}, Security: EffectiveSecurity{None: true},
+	}
+	_, err = client.Execute(context.Background(), operation, RequestInput{Values: map[string]any{
+		ParameterValueKey("path", "id"):   "path-value",
+		ParameterValueKey("query", "id"):  "query-value",
+		ParameterValueKey("header", "id"): "header-value",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	_, err = client.Execute(context.Background(), operation, RequestInput{Values: map[string]any{"id": "ambiguous"}})
+	if err == nil || !strings.Contains(err.Error(), "requires query parameter id") {
+		t.Fatalf("ambiguous bare value error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("ambiguous bare value made request; requests = %d", requests)
+	}
+}

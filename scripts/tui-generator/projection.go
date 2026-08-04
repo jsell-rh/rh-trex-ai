@@ -537,7 +537,7 @@ func readableScalar(document *ir.Document, property *ir.Property) bool {
 }
 
 func (projector *projection) parameter(parameter *ir.Parameter) tui.Parameter {
-	result := tui.Parameter{Name: parameter.Name, In: parameter.In, Required: parameter.Required, Style: parameter.Style, Explode: parameter.Explode}
+	result := tui.Parameter{Name: parameter.Name, In: parameter.In, Required: parameter.Required, Style: parameter.Style, Explode: parameter.Explode, AllowReserved: parameter.AllowReserved}
 	if parameter.Schema != nil {
 		if schema := projector.document.Schema(parameter.Schema.Ref); schema != nil {
 			if len(schema.Types) > 0 {

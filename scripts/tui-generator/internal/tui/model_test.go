@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -170,22 +169,38 @@ func TestStreamingIsIncrementalBoundedSanitizedAndCancelable(t *testing.T) {
 	}
 }
 
-func TestActionWithMissingInputsIsVisibleButMakesNoRequest(t *testing.T) {
-	var actionRequests atomic.Int32
+func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
+	actionRequests := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
 		if request.Method == http.MethodPost {
-			actionRequests.Add(1)
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			actionRequests <- request.URL.EscapedPath() + "?" + request.URL.RawQuery + "|" + request.Header.Get("X-Reason") + "|" + string(body)
+			writer.WriteHeader(http.StatusAccepted)
+			return
 		}
+		writer.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(writer, `{"items":[]}`)
 	}))
 	defer server.Close()
 	descriptor := Descriptor{
 		Title: "Action test", Servers: []Server{{URL: server.URL}},
-		Views: []View{{ID: "things", Kind: "collection", Label: "Things", OperationIDs: []string{"listThings", "archiveThings"}, ListOperationID: "listThings"}},
+		Views: []View{{ID: "things", Kind: "collection", Label: "Things", OperationIDs: []string{"listThings", "archiveThing"}, ListOperationID: "listThings"}},
 		Operations: []Operation{
 			{ID: "listThings", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/things"}}, Response: ResponseShape{ItemsPointer: "/items"}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}},
-			{ID: "archiveThings", Method: http.MethodPost, PathParts: []PathPart{{Literal: "/things:archive"}}, Parameters: []Parameter{{Name: "confirm", In: "query", Required: true}}, RequestBody: &RequestBody{Required: true, ContentType: "application/json"}, SuccessStatuses: []string{"202"}, Capabilities: []string{"action"}, Security: EffectiveSecurity{None: true}},
+			{
+				ID: "archiveThing", Method: http.MethodPost,
+				PathParts: []PathPart{{Literal: "/things/"}, {Parameter: "thing_id"}, {Literal: ":archive"}},
+				Parameters: []Parameter{
+					{Name: "thing_id", In: "path", Required: true, Style: "simple", Type: "string"},
+					{Name: "thing_id", In: "query", Style: "form", Type: "string"},
+					{Name: "X-Reason", In: "header", Required: true, Style: "simple", Type: "string"},
+				},
+				RequestBody:     &RequestBody{Required: true, ContentType: "application/json", Fields: []InputField{{Name: "name", Type: "string", Required: true}}},
+				SuccessStatuses: []string{"202"}, Capabilities: []string{"action"}, Security: EffectiveSecurity{None: true},
+			},
 		},
 	}
 	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL})
@@ -196,11 +211,35 @@ func TestActionWithMissingInputsIsVisibleButMakesNoRequest(t *testing.T) {
 	t.Cleanup(func() { _ = testModel.Quit() })
 	waitForText(t, testModel, "Loaded 0 items")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
-	waitForTexts(t, testModel, "archiveThings", "disabled: requires query confirm, request body")
+	waitForTexts(t, testModel, "archiveThing", "POST · 4 input(s)")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "Action unavailable: requires query confirm, request body")
-	if actionRequests.Load() != 0 {
-		t.Fatalf("disabled action made %d requests", actionRequests.Load())
+	waitForText(t, testModel, "path parameter thing_id (string) — required")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "path parameter thing_id is required")
+	select {
+	case request := <-actionRequests:
+		t.Fatalf("empty required input made request %q", request)
+	default:
+	}
+	testModel.Type("thing/7")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "query parameter thing_id (string) — optional")
+	testModel.Type("notify")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "header parameter X-Reason (string) — required")
+	testModel.Type("operator requested")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "JSON request body (application/json) — required")
+	testModel.Type(`{"name":"updated"}`)
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "Operation completed")
+	select {
+	case request := <-actionRequests:
+		if request != `/things/thing%2F7:archive?thing_id=notify|operator requested|{"name":"updated"}` {
+			t.Fatalf("action request = %q", request)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("action request was not received")
 	}
 }
 

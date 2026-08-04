@@ -154,7 +154,6 @@ func (client *Client) BuildRequest(ctx context.Context, operation Operation, inp
 	if err != nil {
 		return nil, fmt.Errorf("construct request for %s: %w", operation.ID, err)
 	}
-	requestURL.RawQuery = query.Encode()
 	var body io.Reader
 	if len(input.Body) > 0 {
 		body = bytes.NewReader(input.Body)
@@ -163,6 +162,7 @@ func (client *Client) BuildRequest(ctx context.Context, operation Operation, inp
 	if err != nil {
 		return nil, fmt.Errorf("construct request for %s: %w", operation.ID, err)
 	}
+	request.URL.RawQuery = query
 	for name, value := range headers {
 		request.Header.Set(name, value)
 	}

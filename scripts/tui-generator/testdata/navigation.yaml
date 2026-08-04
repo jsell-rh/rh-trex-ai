@@ -84,7 +84,7 @@ paths:
     parameters:
       - {name: parent_id, in: path, required: true, schema: {type: string}}
       - {name: child_id, in: path, required: true, schema: {type: string}}
-      - {name: notify, in: query, required: true, style: form, schema: {type: boolean}}
+      - {name: notify, in: query, required: true, style: form, allowReserved: true, schema: {type: boolean}}
       - {name: X-Reason, in: header, required: true, style: simple, schema: {type: string}}
     post:
       operationId: archiveChild
