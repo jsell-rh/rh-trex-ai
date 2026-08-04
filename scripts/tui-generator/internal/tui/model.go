@@ -776,7 +776,7 @@ func (model *Model) configureTableColumns(view View) {
 		model.leftOverflow = 0
 		model.rightOverflow = 0
 		model.table.SetHeight(max(3, model.height-8))
-		model.table.SetColumns([]table.Column{{Title: "VALUE", Width: max(1, model.width-4)}})
+		model.replaceTableColumns([]table.Column{{Title: "VALUE", Width: max(1, model.width-4)}})
 		return
 	}
 	offset := 0
@@ -799,6 +799,15 @@ func (model *Model) configureTableColumns(view View) {
 	columns := make([]table.Column, 0, len(layout.Visible))
 	for _, index := range layout.Visible {
 		columns = append(columns, table.Column{Title: columnTitle(view, view.Columns[index]), Width: layout.Widths[index]})
+	}
+	model.replaceTableColumns(columns)
+}
+
+func (model *Model) replaceTableColumns(columns []table.Column) {
+	// Bubbles renders rows synchronously from SetColumns. Preserve the row count
+	// and cursor with empty placeholders until applyFilter projects matching cells.
+	if rowCount := len(model.table.Rows()); rowCount > 0 {
+		model.table.SetRows(make([]table.Row, rowCount))
 	}
 	model.table.SetColumns(columns)
 }

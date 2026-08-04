@@ -478,6 +478,16 @@ func TestModelScrollsColumnsWithoutChangingRowsOrFilterWidths(t *testing.T) {
 	if model.frames[0].ColumnOffset != 0 || model.leftOverflow != 0 || model.rightOverflow != 0 || len(model.displayColumns) != len(view.Columns) {
 		t.Fatalf("wide resize did not clamp offset and reveal all columns: frame %#v, columns %v, left %d, right %d", model.frames[0], model.displayColumns, model.leftOverflow, model.rightOverflow)
 	}
+	model.table.SetCursor(1)
+	selected = model.selectedRow()
+	model.width = 24
+	model.resize()
+	if !reflect.DeepEqual(model.displayColumns, []int{0, 1, 2}) || model.rightOverflow != 3 {
+		t.Fatalf("narrow resize did not restore overflow: columns %v, right %d", model.displayColumns, model.rightOverflow)
+	}
+	if after := model.selectedRow(); selected == nil || after == nil || after.Identity != selected.Identity {
+		t.Fatalf("row selection changed during narrow resize: before %#v, after %#v", selected, after)
+	}
 }
 
 func TestPopRestoresCollectionSelectionByIdentity(t *testing.T) {
