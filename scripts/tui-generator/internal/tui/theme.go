@@ -24,6 +24,13 @@ type Theme struct {
 	Border             lipgloss.Style
 	SelectedForeground lipgloss.Style
 	SelectedBackground lipgloss.Style
+	DetailKey          lipgloss.Style
+	DetailValue        lipgloss.Style
+	RawCodeKey         lipgloss.Style
+	RawCodeString      lipgloss.Style
+	RawCodeNumber      lipgloss.Style
+	RawCodeLiteral     lipgloss.Style
+	RawCodePunctuation lipgloss.Style
 	FieldTitleStyle    lipgloss.Style
 	BreadcrumbAncestor lipgloss.Style
 	BreadcrumbActive   lipgloss.Style
@@ -49,6 +56,13 @@ func DefaultTheme() Theme {
 		Border:             lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
 		SelectedForeground: lipgloss.NewStyle().Foreground(lipgloss.Color("0")),
 		SelectedBackground: lipgloss.NewStyle().Background(lipgloss.Color("214")),
+		DetailKey:          lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		DetailValue:        lipgloss.NewStyle().Foreground(lipgloss.Color("255")),
+		RawCodeKey:         lipgloss.NewStyle().Foreground(lipgloss.Color("75")),
+		RawCodeString:      lipgloss.NewStyle().Foreground(lipgloss.Color("42")),
+		RawCodeNumber:      lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
+		RawCodeLiteral:     lipgloss.NewStyle().Foreground(lipgloss.Color("204")),
+		RawCodePunctuation: lipgloss.NewStyle().Foreground(lipgloss.Color("255")),
 		FieldTitleStyle:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")),
 		BreadcrumbAncestor: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("214")),
 		BreadcrumbActive:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("69")),
@@ -197,9 +211,40 @@ func (theme Theme) TableStyles() table.Styles {
 	if theme.plain {
 		return styles
 	}
-	styles.Header = styles.Header.Inherit(theme.Primary)
-	styles.Selected = styles.Selected.Inherit(theme.SelectedForeground).Inherit(theme.SelectedBackground)
+	styles.Header = styles.Header.Foreground(theme.Primary.GetForeground()).Bold(theme.Primary.GetBold())
+	styles.Selected = styles.Selected.
+		Foreground(theme.SelectedForeground.GetForeground()).
+		Background(theme.SelectedBackground.GetBackground())
 	return styles
+}
+
+func (theme Theme) tableRowStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.SelectedBackground.GetBackground())
+}
+func (theme Theme) TableRow(value string) string { return theme.render(theme.tableRowStyle(), value) }
+
+func (theme Theme) detailBodyStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.DetailValue.GetForeground())
+}
+
+func (theme Theme) DetailBody(value string) string {
+	return theme.render(theme.detailBodyStyle(), value)
+}
+
+func (theme Theme) DetailKeyText(value string) string {
+	return theme.render(theme.DetailKey, value)
+}
+
+func (theme Theme) DetailValueText(value string) string {
+	return theme.render(theme.DetailValue, value)
+}
+
+func (theme Theme) RawKey(value string) string     { return theme.render(theme.RawCodeKey, value) }
+func (theme Theme) RawString(value string) string  { return theme.render(theme.RawCodeString, value) }
+func (theme Theme) RawNumber(value string) string  { return theme.render(theme.RawCodeNumber, value) }
+func (theme Theme) RawLiteral(value string) string { return theme.render(theme.RawCodeLiteral, value) }
+func (theme Theme) RawPunctuation(value string) string {
+	return theme.render(theme.RawCodePunctuation, value)
 }
 
 func (theme Theme) Alert(severity AlertSeverity, value string) string {

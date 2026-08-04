@@ -207,6 +207,7 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.streamBytes = 0
 		model.connected = true
 		model.autoscroll = true
+		model.detailValue = nil
 		model.detail.SetContent("")
 		model.mode = modeDetail
 		model.alertSuccess("stream-state", "Stream connected")
@@ -330,10 +331,10 @@ func (model *Model) semanticPage(view View) Page {
 		actions = model.localActions(view)
 	}
 	if model.mode == modeRaw {
-		return DetailPage{SemanticPage{PageTitle: "Raw " + view.Label, PageScope: model.scope(), PageState: state, PageContent: model.detail.View()}}
+		return DetailPage{SemanticPage{PageTitle: "Raw " + view.Label, PageScope: model.scope(), PageState: state, PageContent: model.shell.Theme.DetailBody(model.detail.View())}}
 	}
 	if model.mode == modeDetail {
-		return DetailPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.detail.View(), PageActions: actions}}
+		return DetailPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.shell.Theme.DetailBody(model.detail.View()), PageActions: actions}}
 	}
 	if view.Kind == "stream" {
 		return StreamPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.StreamContent(), PageActions: actions}}
@@ -582,7 +583,7 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			model.alertWarning("selection", "No selected item")
 			return model, nil
 		}
-		model.detail.SetContent(renderDetail(row.Raw))
+		model.ShowDetail(row.Raw, model.shell.Theme)
 		model.mode = modeDetail
 		return model, nil
 	case model.shell.Keys.Matches(key, KeyRaw):
@@ -632,8 +633,7 @@ func (model *Model) openRawResource() (tea.Model, tea.Cmd) {
 		return model, nil
 	}
 	model.rawReturnMode = model.mode
-	model.detail.SetContent(raw)
-	model.detail.GotoTop()
+	model.ShowRaw(raw, model.shell.Theme)
 	model.mode = modeRaw
 	return model, nil
 }
@@ -642,8 +642,7 @@ func (model *Model) closeRawResource() {
 	returnMode := model.rawReturnMode
 	if returnMode == modeDetail {
 		if row := model.selectedRow(); row != nil {
-			model.detail.SetContent(renderDetail(row.Raw))
-			model.detail.GotoTop()
+			model.ShowDetail(row.Raw, model.shell.Theme)
 		}
 	} else {
 		returnMode = modeBrowse
@@ -739,7 +738,7 @@ func (model *Model) followRelationships() (tea.Model, tea.Cmd) {
 	if len(edges) == 0 {
 		row := model.selectedRow()
 		if row != nil {
-			model.detail.SetContent(renderDetail(row.Raw))
+			model.ShowDetail(row.Raw, model.shell.Theme)
 			model.mode = modeDetail
 		}
 		return model, nil
@@ -1143,7 +1142,7 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 	if object, ok := message.result.Body.(map[string]any); ok {
 		row := rowFor(*view, object)
 		frame.Selected = &row
-		model.detail.SetContent(renderDetail(object))
+		model.ShowDetail(object, model.shell.Theme)
 		model.mode = modeDetail
 		model.markReadSuccess(frame)
 		model.shell.Alerts.Clear("request:" + message.operationID)
@@ -1321,8 +1320,7 @@ func (model *Model) resize() {
 		model.applyFilter()
 	}
 	contentWidth, contentHeight := model.pageContentSize()
-	model.detail.Width = max(1, contentWidth)
-	model.detail.Height = max(1, contentHeight)
+	model.DetailStreamComponent.Resize(contentWidth, contentHeight, model.shell.Theme)
 }
 
 func (model *Model) pageContentSize() (int, int) {
@@ -1596,36 +1594,6 @@ func responseItems(body any, pointer string) ([]map[string]any, error) {
 		items = append(items, object)
 	}
 	return items, nil
-}
-
-func renderDetail(value any) string {
-	var lines []string
-	flattenDetail("", value, 0, &lines)
-	return strings.Join(lines, "\n")
-}
-
-func flattenDetail(prefix string, value any, depth int, lines *[]string) {
-	if depth > 8 {
-		*lines = append(*lines, SanitizeCell(prefix)+": …")
-		return
-	}
-	switch typed := value.(type) {
-	case map[string]any:
-		keys := sortedAnyKeys(typed)
-		for _, key := range keys {
-			name := key
-			if prefix != "" {
-				name = prefix + "." + key
-			}
-			flattenDetail(name, typed[key], depth+1, lines)
-		}
-	case []any:
-		for index, item := range typed {
-			flattenDetail(fmt.Sprintf("%s[%d]", prefix, index), item, depth+1, lines)
-		}
-	default:
-		*lines = append(*lines, SanitizeCell(prefix)+": "+Sanitize(scalarString(typed)))
-	}
 }
 
 func pumpStream(ctx context.Context, reader io.ReadCloser, contentType string, events chan<- streamEvent) {

@@ -75,11 +75,13 @@ type ResourceTableComponent struct {
 	restoreIdentity string
 	sortProperty    string
 	sortDescending  bool
+	theme           Theme
 }
 
 // DetailStreamComponent owns the shared viewport and bounded stream state.
 type DetailStreamComponent struct {
 	detail       viewport.Model
+	detailValue  any
 	streamCancel context.CancelFunc
 	streamEvents <-chan streamEvent
 	streamLines  []string

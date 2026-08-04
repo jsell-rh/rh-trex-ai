@@ -11,6 +11,7 @@ func (component *ResourceTableComponent) Reset(view View, theme Theme, width, he
 	component.sortProperty = view.DefaultSort
 	component.sortDescending = false
 	component.table = table.New(table.WithFocused(true), table.WithHeight(max(1, height)))
+	component.theme = theme
 	component.table.SetStyles(theme.TableStyles())
 	component.rows = nil
 	component.visible = nil
@@ -190,7 +191,11 @@ func (component *ResourceTableComponent) Selected() *Row {
 }
 
 func (component *ResourceTableComponent) View() string {
-	result := component.table.View()
+	lines := strings.Split(component.table.View(), "\n")
+	for index := 1; index < len(lines); index++ {
+		lines[index] = component.theme.TableRow(lines[index])
+	}
+	result := strings.Join(lines, "\n")
 	if overflow := renderColumnOverflow(component.leftOverflow, component.rightOverflow); overflow != "" {
 		result += "\n" + overflow
 	}

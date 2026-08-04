@@ -299,6 +299,96 @@ func TestFrameTitleIsCenteredAndUsesSemanticSegments(t *testing.T) {
 	}
 }
 
+func TestTableStylesOverrideBubblesRowColors(t *testing.T) {
+	theme := DefaultTheme()
+	styles := theme.TableStyles()
+	if styles.Header.GetForeground() != theme.Primary.GetForeground() {
+		t.Fatalf("table header foreground = %v, want primary %v", styles.Header.GetForeground(), theme.Primary.GetForeground())
+	}
+	if styles.Cell.GetForeground() != (lipgloss.NoColor{}) {
+		t.Fatalf("cell foreground = %v; per-cell color would override selected-row black", styles.Cell.GetForeground())
+	}
+	if theme.tableRowStyle().GetForeground() != styles.Selected.GetBackground() {
+		t.Fatalf("unselected row foreground = %v, want selected background %v", theme.tableRowStyle().GetForeground(), styles.Selected.GetBackground())
+	}
+	if theme.SelectedForeground.GetForeground() != lipgloss.Color("0") {
+		t.Fatalf("selected foreground token = %v, want black", theme.SelectedForeground.GetForeground())
+	}
+	if styles.Selected.GetForeground() != theme.SelectedForeground.GetForeground() ||
+		styles.Selected.GetBackground() != theme.SelectedBackground.GetBackground() {
+		t.Fatalf("selected row style = foreground %v background %v, want foreground %v background %v",
+			styles.Selected.GetForeground(), styles.Selected.GetBackground(),
+			theme.SelectedForeground.GetForeground(), theme.SelectedBackground.GetBackground())
+	}
+}
+
+func TestDetailBodyMatchesSharedACPFormatting(t *testing.T) {
+	theme := DefaultTheme()
+	if theme.DetailKey.GetForeground() != lipgloss.Color("240") {
+		t.Fatalf("detail key foreground = %v, want dim 240", theme.DetailKey.GetForeground())
+	}
+	if theme.DetailValue.GetForeground() != lipgloss.Color("255") || theme.detailBodyStyle().GetForeground() != theme.DetailValue.GetForeground() {
+		t.Fatalf("detail value foreground = %v and body foreground = %v, want bright white 255", theme.DetailValue.GetForeground(), theme.detailBodyStyle().GetForeground())
+	}
+
+	value := map[string]any{"id": float64(7), "species": "tyrannosaurus rex"}
+	const want = "     id  7\nspecies  tyrannosaurus\n         rex"
+	if got := renderDetailBody(value, PlainTheme(), 24); got != want {
+		t.Fatalf("detail body:\n%q\nwant:\n%q", got, want)
+	}
+	wide := renderDetailBody(value, PlainTheme(), 40)
+	narrow := renderDetailBody(value, PlainTheme(), 16)
+	if wide == narrow || !strings.Contains(narrow, "\n       urus rex") {
+		t.Fatalf("detail body did not reflow with aligned continuation: wide=%q narrow=%q", wide, narrow)
+	}
+}
+
+func TestRawJSONHighlightingIsTokenAwareAndLossless(t *testing.T) {
+	raw := "{\n  \"name\": \"Rex\",\n  \"count\": 7,\n  \"active\": true,\n  \"other\": null\n}"
+	tokens := tokenizeRawJSON(raw)
+	wantKinds := map[string]rawJSONTokenKind{
+		"\"name\"": rawJSONKey,
+		"\"Rex\"":  rawJSONString,
+		"7":        rawJSONNumber,
+		"true":     rawJSONLiteral,
+		"null":     rawJSONLiteral,
+		"{":        rawJSONPunctuation,
+	}
+	for text, want := range wantKinds {
+		found := false
+		for _, token := range tokens {
+			if token.text == text {
+				found = true
+				if token.kind != want {
+					t.Fatalf("token %q kind = %v, want %v", text, token.kind, want)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("token %q absent from %#v", text, tokens)
+		}
+	}
+	if got := ansi.Strip(renderRawCode(raw, DefaultTheme())); got != raw {
+		t.Fatalf("highlighting changed raw JSON:\n%q\nwant:\n%q", got, raw)
+	}
+	theme := DefaultTheme()
+	colors := []any{
+		theme.RawCodeKey.GetForeground(),
+		theme.RawCodeString.GetForeground(),
+		theme.RawCodeNumber.GetForeground(),
+		theme.RawCodeLiteral.GetForeground(),
+		theme.RawCodePunctuation.GetForeground(),
+	}
+	seen := make(map[any]bool, len(colors))
+	for _, color := range colors {
+		seen[color] = true
+	}
+	if len(seen) != len(colors) {
+		t.Fatalf("raw code token colors are not distinct: %#v", colors)
+	}
+}
+
 func TestFrameTitleAppendsSanitizedFilterBadgeAndFilteredCount(t *testing.T) {
 	count := 2
 	title := PageFrameTitle{Kind: "Dinosaur", Context: "all", Count: &count, Filter: "arch\x1b]52;c;bad\a ae"}

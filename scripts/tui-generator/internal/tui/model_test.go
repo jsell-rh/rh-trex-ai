@@ -71,7 +71,7 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForText(t, testModel, "Alpha")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "description: Parent restored red", "<parents>", "<parent[parent/7]>")
+	waitForTexts(t, testModel, "description  Parent restored red", "<parents>", "<parent[parent/7]>")
 
 	// The item has two outgoing relationships, so Enter must open a stable chooser.
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
@@ -79,11 +79,11 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForTexts(t, testModel, "Scoped Kid", "<parents>", "<parent[parent/7]>", "<children[parent/7]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "description: Child detail", "<child[child/1]>")
+	waitForTexts(t, testModel, "description  Child detail", "<child[child/1]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForText(t, testModel, "Scoped Kid")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	waitForTexts(t, testModel, "description: Parent restored red", "<parents>", "<parent[parent/7]>")
+	waitForTexts(t, testModel, "description  Parent restored red", "<parents>", "<parent[parent/7]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForText(t, testModel, "Other")
 
@@ -93,11 +93,11 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Account Nine")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForTexts(t, testModel, "description: Account restored", "<accounts>", "<account[account-9]>")
+	waitForTexts(t, testModel, "description  Account restored", "<accounts>", "<account[account-9]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForTexts(t, testModel, "Account Kid", "<accounts>", "<account[account-9]>", "<children[account-9]>")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	waitForTexts(t, testModel, "description: Account restored", "<accounts>", "<account[account-9]>")
+	waitForTexts(t, testModel, "description  Account restored", "<accounts>", "<account[account-9]>")
 
 	if err := testModel.Quit(); err != nil {
 		t.Fatal(err)
