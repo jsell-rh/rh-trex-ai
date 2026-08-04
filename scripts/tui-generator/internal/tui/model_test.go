@@ -249,6 +249,39 @@ func TestEvaluateExplicitRuntimeBindingsAndMissingValue(t *testing.T) {
 	}
 }
 
+func TestEvaluateStandardLinkRuntimeExpressions(t *testing.T) {
+	frame := Frame{
+		Bindings:      map[string]any{"project_id": "project/1"},
+		RequestValues: map[string]any{"project_id": "project/1", "filter": "active", "X-Tenant": "tenant-7"},
+		RequestBody:   decodeRuntimeBody([]byte(`{"parent":{"id":"parent/9"}}`)),
+		ResponseHeaders: http.Header{
+			"Location": []string{"/children/child-3"},
+		},
+		ResponseBody: map[string]any{"id": "child-3"},
+	}
+	row := Row{Raw: map[string]any{"id": "fallback-row"}}
+	edge := Edge{Name: "standard expressions", Bindings: []Binding{
+		{Target: "path", SourceKind: "runtime-expression", Source: "$request.path.project_id"},
+		{Target: "query", SourceKind: "runtime-expression", Source: "$request.query.filter"},
+		{Target: "request_header", SourceKind: "runtime-expression", Source: "$request.header.x-tenant"},
+		{Target: "request_body", SourceKind: "runtime-expression", Source: "$request.body#/parent/id"},
+		{Target: "response_header", SourceKind: "runtime-expression", Source: "$response.header.location"},
+		{Target: "response_body", SourceKind: "runtime-expression", Source: "$response.body#/id"},
+	}}
+	bindings, err := evaluateBindings(edge, frame, row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"project_id": "project/1", "path": "project/1", "query": "active",
+		"request_header": "tenant-7", "request_body": "parent/9",
+		"response_header": "/children/child-3", "response_body": "child-3",
+	}
+	if !reflect.DeepEqual(bindings, want) {
+		t.Fatalf("standard runtime bindings = %#v, want %#v", bindings, want)
+	}
+}
+
 func TestColumnPriorityControlsNarrowTerminalRetention(t *testing.T) {
 	model := &Model{width: 25, height: 20}
 	view := View{Columns: []Column{

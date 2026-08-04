@@ -175,14 +175,25 @@ func (client *Client) BuildRequest(ctx context.Context, operation Operation, inp
 		request.Header.Set("Content-Type", operation.RequestBody.ContentType)
 	}
 	if !operation.Security.None {
-		if client.config.Token == "" {
+		anonymousAllowed := false
+		bearerSupported := false
+		for _, alternative := range operation.Security.Requirements {
+			if len(alternative.Schemes) == 0 {
+				anonymousAllowed = true
+			} else {
+				bearerSupported = true
+			}
+		}
+		if client.config.Token == "" && !anonymousAllowed {
 			return nil, fmt.Errorf("operation %s requires a bearer token", operation.ID)
 		}
-		requestOrigin := origin(requestURL)
-		if requestOrigin != client.credentialOrigin && !client.trustedOrigins[requestOrigin] {
-			return nil, fmt.Errorf("operation %s uses untrusted credential origin %s", operation.ID, requestOrigin)
+		if client.config.Token != "" && bearerSupported {
+			requestOrigin := origin(requestURL)
+			if requestOrigin != client.credentialOrigin && !client.trustedOrigins[requestOrigin] {
+				return nil, fmt.Errorf("operation %s uses untrusted credential origin %s", operation.ID, requestOrigin)
+			}
+			request.Header.Set("Authorization", "Bearer "+client.config.Token)
 		}
-		request.Header.Set("Authorization", "Bearer "+client.config.Token)
 	}
 	return request, nil
 }

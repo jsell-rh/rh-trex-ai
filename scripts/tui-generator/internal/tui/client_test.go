@@ -102,6 +102,40 @@ func TestCrossOriginCredentialRefused(t *testing.T) {
 	}
 }
 
+func TestOptionalBearerSecurityAllowsAnonymousRequest(t *testing.T) {
+	authorizations := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		authorizations <- request.Header.Get("Authorization")
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{}`)
+	}))
+	defer server.Close()
+	operation := Operation{
+		ID: "optional", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/optional"}},
+		Response: ResponseShape{ContentType: "application/json"}, SuccessStatuses: []string{"200"},
+		Security: EffectiveSecurity{Requirements: []SecurityAlternative{{Schemes: []string{}}, {Schemes: []string{"Bearer"}}}},
+	}
+	for _, testCase := range []struct {
+		name, token, wantAuthorization string
+	}{
+		{name: "anonymous"},
+		{name: "authenticated", token: "secret", wantAuthorization: "Bearer secret"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client, err := NewClient(Descriptor{Servers: []Server{{URL: server.URL}}}, ClientConfig{BaseURL: server.URL, Token: testCase.token})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.Execute(context.Background(), operation, RequestInput{}); err != nil {
+				t.Fatal(err)
+			}
+			if authorization := <-authorizations; authorization != testCase.wantAuthorization {
+				t.Fatalf("authorization = %q, want %q", authorization, testCase.wantAuthorization)
+			}
+		})
+	}
+}
+
 func TestClientRejectsMissingOrInvalidRequiredBodyBeforeRequest(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

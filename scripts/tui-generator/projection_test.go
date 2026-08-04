@@ -83,6 +83,10 @@ func TestMappedBindingGrammar(t *testing.T) {
 		source     string
 	}{
 		{name: "request path", expression: "$request.path.project_id", kind: "runtime-expression", source: "$request.path.project_id"},
+		{name: "request query", expression: "$request.query.filter", kind: "runtime-expression", source: "$request.query.filter"},
+		{name: "request header", expression: "$request.header.X-Tenant", kind: "runtime-expression", source: "$request.header.X-Tenant"},
+		{name: "request body", expression: "$request.body#/parent/id", kind: "runtime-expression", source: "$request.body#/parent/id"},
+		{name: "response header", expression: "$response.header.Location", kind: "runtime-expression", source: "$response.header.Location"},
 		{name: "response body", expression: "$response.body#/id", kind: "runtime-expression", source: "$response.body#/id"},
 		{name: "string literal", expression: "fixed", kind: "literal", source: "fixed"},
 		{name: "numeric literal", expression: 7, kind: "literal", source: "7"},
@@ -97,10 +101,31 @@ func TestMappedBindingGrammar(t *testing.T) {
 			}
 		})
 	}
-	for _, invalid := range []any{"$request.query.filter", "$response.header.Location", nil} {
+	for _, invalid := range []any{"$request.query.", "$request.body", "$response.header.", nil} {
 		if binding, err := mappedBinding("target", invalid); err == nil {
 			t.Fatalf("invalid expression %#v produced binding %#v", invalid, binding)
 		}
+	}
+}
+
+func TestOptionalSecurityAlternativeIsPreserved(t *testing.T) {
+	document := &ir.Document{
+		SecuritySchemes: []*ir.SecurityScheme{{Name: "Bearer", Type: "http", Scheme: "bearer"}},
+	}
+	operation := &ir.Operation{Security: ir.OperationSecurity{
+		State: ir.SecurityOverride,
+		Requirements: []ir.SecurityRequirement{
+			{Schemes: []ir.SecuritySchemeUse{}},
+			{Schemes: []ir.SecuritySchemeUse{{Name: "Bearer"}}},
+		},
+	}}
+	projector := &projection{document: document}
+	security := projector.security(operation)
+	if security.None || len(security.Requirements) != 2 || len(security.Requirements[0].Schemes) != 0 || !reflect.DeepEqual(security.Requirements[1].Schemes, []string{"Bearer"}) {
+		t.Fatalf("optional security projection = %#v", security)
+	}
+	if len(projector.fatal) != 0 {
+		t.Fatalf("optional anonymous alternative produced fatal diagnostics: %v", projector.fatal)
 	}
 }
 

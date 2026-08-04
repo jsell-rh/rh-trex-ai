@@ -644,6 +644,10 @@ func (projector *projection) security(operation *ir.Operation) tui.EffectiveSecu
 	for _, alternative := range requirements {
 		projected := tui.SecurityAlternative{}
 		valid := true
+		if len(alternative.Schemes) == 0 {
+			supported = append(supported, projected)
+			continue
+		}
 		for _, use := range alternative.Schemes {
 			declared = append(declared, use.Name)
 			scheme := securityScheme(projector.document, use.Name)
@@ -653,7 +657,7 @@ func (projector *projection) security(operation *ir.Operation) tui.EffectiveSecu
 			}
 			projected.Schemes = append(projected.Schemes, use.Name)
 		}
-		if valid && len(projected.Schemes) > 0 {
+		if valid {
 			sort.Strings(projected.Schemes)
 			supported = append(supported, projected)
 		}
@@ -726,7 +730,7 @@ func (projector *projection) reindex() {
 
 func mappedBinding(target string, expression any) (tui.Binding, error) {
 	if text, ok := expression.(string); ok {
-		if strings.HasPrefix(text, "$request.path.") || strings.HasPrefix(text, "$response.body#/") || text == "$response.body#" {
+		if supportedRuntimeExpression(text) {
 			return tui.Binding{Target: target, SourceKind: "runtime-expression", Source: text}, nil
 		}
 		if strings.HasPrefix(text, "$") {
@@ -742,6 +746,25 @@ func mappedBinding(target string, expression any) (tui.Binding, error) {
 		return tui.Binding{}, fmt.Errorf("target %s has a null literal", target)
 	}
 	return tui.Binding{Target: target, SourceKind: "literal", Source: strings.Trim(string(data), `"`)}, nil
+}
+
+func supportedRuntimeExpression(expression string) bool {
+	for _, prefix := range []string{
+		"$request.path.",
+		"$request.query.",
+		"$request.header.",
+		"$response.header.",
+	} {
+		if strings.HasPrefix(expression, prefix) && len(expression) > len(prefix) {
+			return true
+		}
+	}
+	for _, prefix := range []string{"$request.body#", "$response.body#"} {
+		if expression == prefix || strings.HasPrefix(expression, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func successStatuses(operation *ir.Operation) []string {

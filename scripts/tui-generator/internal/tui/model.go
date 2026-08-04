@@ -3,8 +3,10 @@ package tui
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -30,6 +32,9 @@ type Frame struct {
 	TargetViewID     string
 	Label            string
 	Selected         *Row
+	RequestValues    map[string]any
+	RequestBody      any
+	ResponseHeaders  http.Header
 	ResponseBody     any
 }
 
@@ -79,6 +84,7 @@ type Model struct {
 type operationResultMsg struct {
 	viewID      string
 	operationID string
+	input       RequestInput
 	result      Result
 	err         error
 }
@@ -495,7 +501,7 @@ func (model *Model) execute(operation Operation, input RequestInput) tea.Cmd {
 	viewID := model.frames[len(model.frames)-1].TargetViewID
 	return func() tea.Msg {
 		result, err := model.client.Execute(context.Background(), operation, input)
-		return operationResultMsg{viewID: viewID, operationID: operation.ID, result: result, err: err}
+		return operationResultMsg{viewID: viewID, operationID: operation.ID, input: input, result: result, err: err}
 	}
 }
 
@@ -560,6 +566,11 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 		return model, nil
 	}
 	view := model.currentView()
+	frame := &model.frames[len(model.frames)-1]
+	frame.RequestValues = cloneBindings(message.input.Values)
+	frame.RequestBody = decodeRuntimeBody(message.input.Body)
+	frame.ResponseHeaders = message.result.Headers.Clone()
+	frame.ResponseBody = message.result.Body
 	if containsString(operation.Capabilities, "list") && !operation.Response.Stream {
 		items, err := responseItems(message.result.Body, operation.Response.ItemsPointer)
 		if err != nil {
@@ -571,8 +582,6 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 		return model, nil
 	}
 	if object, ok := message.result.Body.(map[string]any); ok {
-		frame := &model.frames[len(model.frames)-1]
-		frame.ResponseBody = object
 		row := rowFor(*view, object)
 		frame.Selected = &row
 		model.detail.SetContent(renderDetail(object))
@@ -808,18 +817,67 @@ func evaluateBindings(edge Edge, frame Frame, row Row) (map[string]any, error) {
 }
 
 func evaluateExpression(expression string, frame Frame, row Row) (any, error) {
-	if strings.HasPrefix(expression, "$request.path.") {
-		name := strings.TrimPrefix(expression, "$request.path.")
-		value, ok := frame.Bindings[name]
+	for _, prefix := range []string{"$request.path.", "$request.query."} {
+		if !strings.HasPrefix(expression, prefix) {
+			continue
+		}
+		name := strings.TrimPrefix(expression, prefix)
+		value, ok := frame.RequestValues[name]
 		if !ok {
-			return nil, fmt.Errorf("request path value %s is absent", name)
+			value, ok = frame.Bindings[name]
+		}
+		if !ok {
+			return nil, fmt.Errorf("request parameter %s is absent", name)
 		}
 		return value, nil
 	}
+	if strings.HasPrefix(expression, "$request.header.") {
+		name := strings.TrimPrefix(expression, "$request.header.")
+		for candidate, value := range frame.RequestValues {
+			if strings.EqualFold(candidate, name) {
+				return value, nil
+			}
+		}
+		return nil, fmt.Errorf("request header %s is absent", name)
+	}
+	if expression == "$request.body#" || strings.HasPrefix(expression, "$request.body#/") {
+		return resolveRuntimeBody(frame.RequestBody, strings.TrimPrefix(expression, "$request.body#"), "request")
+	}
+	if strings.HasPrefix(expression, "$response.header.") {
+		name := strings.TrimPrefix(expression, "$response.header.")
+		if value := frame.ResponseHeaders.Get(name); value != "" {
+			return value, nil
+		}
+		return nil, fmt.Errorf("response header %s is absent", name)
+	}
 	if strings.HasPrefix(expression, "$response.body#") {
-		return ResolveJSONPointer(row.Raw, strings.TrimPrefix(expression, "$response.body#"))
+		body := frame.ResponseBody
+		if body == nil {
+			body = row.Raw
+		}
+		return resolveRuntimeBody(body, strings.TrimPrefix(expression, "$response.body#"), "response")
 	}
 	return nil, fmt.Errorf("unsupported runtime expression %q", expression)
+}
+
+func decodeRuntimeBody(body []byte) any {
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return string(body)
+	}
+	return value
+}
+
+func resolveRuntimeBody(body any, pointer, label string) (any, error) {
+	if body == nil {
+		return nil, fmt.Errorf("%s body is absent", label)
+	}
+	return ResolveJSONPointer(body, pointer)
 }
 
 func responseItems(body any, pointer string) ([]map[string]any, error) {
