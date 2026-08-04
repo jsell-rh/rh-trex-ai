@@ -33,7 +33,7 @@ type HeaderModel struct {
 type ShellView struct {
 	Header     HeaderModel
 	Page       Page
-	Command    string
+	Command    *CommandPromptView
 	Breadcrumb []BreadcrumbSegment
 	HintIDs    []BindingID
 }
@@ -51,7 +51,7 @@ func NewShell(token string) Shell {
 
 func (shell *Shell) shortcuts(view ShellView) []ShortcutHint {
 	var actions []LocalAction
-	if view.Page != nil && view.Command == "" && !shell.Modal.Active() {
+	if view.Page != nil && view.Command == nil && !shell.Modal.Active() {
 		actions = view.Page.Actions()
 	}
 	return shell.Keys.Shortcuts(view.HintIDs, actions)
@@ -59,7 +59,7 @@ func (shell *Shell) shortcuts(view ShellView) []ShortcutHint {
 
 func (shell *Shell) Layout(view ShellView, width, height int) ShellLayout {
 	lines := buildHeaderLines(view.Header)
-	return CalculateShellLayout(width, height, view.Command != "", headerLineValues(lines), shell.shortcuts(view))
+	return CalculateShellLayout(width, height, view.Command != nil, headerLineValues(lines), shell.shortcuts(view))
 }
 
 func (shell *Shell) Render(view ShellView, width, height int) string {
@@ -71,8 +71,9 @@ func (shell *Shell) Render(view ShellView, width, height int) string {
 	if layout.HeaderRows > 0 {
 		rows = append(rows, renderHeader(view.Header, layout, shell.Theme)...)
 	}
-	if layout.CommandRows > 0 {
-		rows = append(rows, shell.Theme.CommandBar(view.Command, layout.Width))
+	if layout.CommandRows > 0 && view.Command != nil {
+		prompt := shell.Theme.CommandPrompt(*view.Command, layout.Width, layout.CommandRows)
+		rows = append(rows, strings.Split(prompt, "\n")...)
 	}
 	if layout.PageRows > 0 {
 		pageBody := shell.Modal.Render(view.Page.Content(), layout.ContentWidth, layout.ContentHeight, shell.Theme)

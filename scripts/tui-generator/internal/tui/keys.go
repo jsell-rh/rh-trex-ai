@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -31,6 +32,9 @@ const (
 	KeyDismissAlert     BindingID = "dismiss-alert"
 	KeyHistoryPrevious  BindingID = "history-previous"
 	KeyHistoryNext      BindingID = "history-next"
+	KeySuggestionNext   BindingID = "suggestion-next"
+	KeySuggestionPrev   BindingID = "suggestion-previous"
+	KeyAcceptSuggestion BindingID = "accept-suggestion"
 	KeyToggleAutoscroll BindingID = "toggle-autoscroll"
 	KeyAlertDetails     BindingID = "alert-details"
 	KeySortNext         BindingID = "sort-next"
@@ -82,6 +86,9 @@ func DefaultKeyRegistry() KeyRegistry {
 		{KeyDismissAlert, key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "dismiss alert")), true, 140, 85},
 		{KeyHistoryPrevious, key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "previous history")), false, 150, 60},
 		{KeyHistoryNext, key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "next history")), false, 160, 60},
+		{KeySuggestionNext, key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "next suggestion")), false, 161, 60},
+		{KeySuggestionPrev, key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "previous suggestion")), false, 162, 60},
+		{KeyAcceptSuggestion, key.NewBinding(key.WithKeys("tab", "right", "ctrl+f"), key.WithHelp("tab/→/ctrl+f", "complete")), false, 163, 65},
 		{KeyToggleAutoscroll, key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "toggle autoscroll")), false, 170, 60},
 		{KeyAlertDetails, key.NewBinding(key.WithKeys("!"), key.WithHelp("!", "alert details")), true, 180, 85},
 		{KeySortNext, key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "next sort")), false, 190, 50},
@@ -94,9 +101,36 @@ func DefaultKeyRegistry() KeyRegistry {
 	return registry
 }
 
+func (registry KeyRegistry) ConfigureCommandInput(input *textinput.Model) {
+	if input == nil {
+		return
+	}
+	if spec, present := registry.bindings[KeySuggestionNext]; present {
+		input.KeyMap.NextSuggestion = spec.Binding
+	}
+	if spec, present := registry.bindings[KeySuggestionPrev]; present {
+		input.KeyMap.PrevSuggestion = spec.Binding
+	}
+}
+
 func (registry KeyRegistry) Matches(message tea.KeyMsg, id BindingID) bool {
 	spec, present := registry.bindings[id]
 	return present && key.Matches(message, spec.Binding)
+}
+
+func (registry KeyRegistry) Hint(id BindingID) (ShortcutHint, bool) {
+	spec, present := registry.bindings[id]
+	if !present {
+		return ShortcutHint{}, false
+	}
+	help := spec.Binding.Help()
+	if help.Key == "" || help.Desc == "" {
+		return ShortcutHint{}, false
+	}
+	return ShortcutHint{
+		ID: id, Key: SanitizeCell(help.Key), Description: SanitizeCell(help.Desc),
+		Order: spec.Order, Priority: spec.Priority,
+	}, true
 }
 
 func (registry KeyRegistry) Hints(ids ...BindingID) string {
@@ -107,11 +141,8 @@ func (registry KeyRegistry) Hints(ids ...BindingID) string {
 			continue
 		}
 		seen[id] = true
-		if spec, present := registry.bindings[id]; present {
-			help := spec.Binding.Help()
-			if help.Key != "" && help.Desc != "" {
-				parts = append(parts, fmt.Sprintf("[%s] %s", help.Key, help.Desc))
-			}
+		if hint, present := registry.Hint(id); present {
+			parts = append(parts, fmt.Sprintf("[%s] %s", hint.Key, hint.Description))
 		}
 	}
 	return strings.Join(parts, "  ")
@@ -127,18 +158,11 @@ func (registry KeyRegistry) Shortcuts(ids []BindingID, actions []LocalAction) []
 			continue
 		}
 		seen[id] = true
-		spec, present := registry.bindings[id]
+		hint, present := registry.Hint(id)
 		if !present {
 			continue
 		}
-		help := spec.Binding.Help()
-		if help.Key == "" || help.Desc == "" {
-			continue
-		}
-		result = append(result, ShortcutHint{
-			ID: id, Key: SanitizeCell(help.Key), Description: SanitizeCell(help.Desc),
-			Order: spec.Order, Priority: spec.Priority,
-		})
+		result = append(result, hint)
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].Order < result[j].Order })
 	for index, action := range actions {

@@ -159,7 +159,7 @@ The shared layout SHALL render only complete shortcut entries. When terminal wid
 
 ### Requirement: Centralized Responsive Layout
 
-One shared layout component SHALL calculate all shell and content dimensions continuously from Bubble Tea window-size messages. It SHALL NOT impose a minimum terminal width, use fixed width breakpoints, or replace the active page with a terminal-too-small screen. As horizontal space contracts, it SHALL first omit optional header metadata and low-priority hints according to measured fit, then compress table columns to their shared minimums and expose horizontal overflow rather than remove declared columns solely because of terminal width. All dimensions SHALL be clamped to non-negative values, and child components SHALL NOT perform independent terminal-size arithmetic. Constrained layout SHALL preserve active page identity, navigation, overflow affordances, and the alert rail whenever the terminal has rows available for them.
+One shared layout component SHALL calculate all shell and content dimensions continuously from Bubble Tea window-size messages. It SHALL NOT impose a minimum terminal width, use fixed width breakpoints, or replace the active page with a terminal-too-small screen. As horizontal space contracts, it SHALL first omit optional header metadata and low-priority hints according to measured fit, then compress table columns to their shared minimums and expose horizontal overflow rather than remove declared columns solely because of terminal width. An active command/filter prompt SHALL receive three rows for its complete border whenever three rows remain after the fixed alert and breadcrumb rows; only an extremely short terminal that cannot contain all three rows MAY use a clipped fallback. All dimensions SHALL be clamped to non-negative values, and child components SHALL NOT perform independent terminal-size arithmetic. Constrained layout SHALL preserve active page identity, navigation, overflow affordances, and the alert rail whenever the terminal has rows available for them.
 
 #### Scenario: Continuously constrain and restore the terminal
 
@@ -183,7 +183,7 @@ The generated runtime SHALL have exactly one implementation for each shell and p
 
 ### Requirement: Unified Page Contract
 
-Every list, detail, stream, loading, empty, forbidden, and fatal page SHALL implement one shared page lifecycle and SHALL provide only semantic page title, scope, count, content, local actions, and state to the application shell. The shell SHALL remain responsible for sizing, chrome, global keys, breadcrumbs, alerts, and modal overlays. Replacing a page SHALL preserve the shell, applicable alerts, navigation stack, and focus policy.
+Every resource-catalog, list, detail, stream, loading, empty, forbidden, and fatal page SHALL implement one shared page lifecycle and SHALL provide only semantic page title, scope, count, content, local actions, and state to the application shell. The shell SHALL remain responsible for sizing, chrome, global keys, breadcrumbs, alerts, and modal overlays. Replacing a page SHALL preserve the shell, applicable alerts, navigation stack, and focus policy.
 
 #### Scenario: Replace a loading page with content
 
@@ -194,7 +194,7 @@ Every list, detail, stream, loading, empty, forbidden, and fatal page SHALL impl
 
 ### Requirement: Shared Resource Table Page
 
-All collection views SHALL use one reusable resource-table page backed by the Bubbles table component. It SHALL render a descriptor-derived `kind(context)[count]` title centered in the page frame's top border, with unscoped context rendered as `all`. Kind, context, and count SHALL use distinct semantic theme styles, and any non-ready page state SHALL use a fourth state-appropriate semantic style. The component SHALL also render full-row selection, active sort and filter state, deterministic adaptive columns, and shared loading, empty, forbidden, and stale-data states. Sorting, filtering, selection restoration by validated identity, and row navigation SHALL be implemented once for every resource descriptor.
+The top-level resource catalog and all collection views SHALL use one reusable resource-table page backed by the Bubbles table component. It SHALL render a descriptor-derived `kind(context)[count]` title centered in the page frame's top border, with unscoped context rendered as `all`. Kind, context, and count SHALL use distinct semantic theme styles, and any non-ready page state SHALL use a fourth state-appropriate semantic style. While a non-empty table filter is active, the same centered title SHALL append one visually distinct `</filter>` badge containing the sanitized active expression; the badge SHALL update with live filter input, remain after the prompt closes, and disappear immediately when the filter is cleared. The count SHALL describe the filtered visible rows. The component SHALL also render full-row selection, active sort and filter state, deterministic adaptive columns, and shared loading, empty, forbidden, and stale-data states. An active ascending or descending sort marker SHALL be a protected left prefix of its header label, such as `↑ NAME`, so right-side ellipsis truncation cannot hide the sort state. Sorting, filtering, selection restoration by validated identity, and row navigation SHALL be implemented once for every resource descriptor and the catalog.
 
 #### Scenario: Render unrelated collection schemas
 
@@ -203,6 +203,13 @@ All collection views SHALL use one reusable resource-table page backed by the Bu
 - THEN the same resource-table component SHALL render both using their descriptors
 - AND each `kind(context)[count]` label SHALL remain centered in the frame border with visually distinct kind, context, and count segments
 - AND neither view SHALL own a duplicated table setup, empty state, sorting function, or selection policy
+
+#### Scenario: Keep sort direction visible in a narrow column
+
+- GIVEN the active sort column has a header label wider than its allocated width
+- WHEN the shared table truncates the header with a right-side ellipsis
+- THEN the ascending or descending marker SHALL remain visible at the left edge
+- AND changing sort direction SHALL replace that prefix without changing the declared label
 
 ### Requirement: Shared Breadcrumb Trail
 
@@ -222,7 +229,7 @@ The breadcrumb component SHALL measure terminal display cells and render only co
 
 ### Requirement: Content-Aware Column Sizing and Horizontal Overflow
 
-The shared resource-table component SHALL calculate column widths from sanitized terminal display cells rather than byte length, rune count, or equal division of the viewport. For each declared column, its natural width SHALL be the maximum display width of its header including active sort decoration and every value in the currently loaded unfiltered result, plus the shared inter-column gutter. The sizing pass SHALL correctly measure combining characters, wide Unicode characters, and emoji and SHALL remain stable while the user scrolls rows or changes a filter.
+The shared resource-table component SHALL calculate column widths from sanitized terminal display cells rather than byte length, rune count, or equal division of the viewport. For each declared column, its natural width SHALL be the maximum display width of its header including the protected left-prefix active sort decoration and every value in the currently loaded unfiltered result, plus the shared inter-column gutter. The sizing pass SHALL correctly measure combining characters, wide Unicode characters, and emoji and SHALL remain stable while the user scrolls rows or changes a filter.
 
 One centralized sizing policy SHALL define and test semantic minimum widths, maximum widths, gutters, and expansion weights. Natural widths SHALL be clamped to those bounds. When bounded columns fit, unused space SHALL be distributed deterministically to eligible flexible text columns without needlessly expanding compact identifiers, statuses, booleans, or numbers. When they do not fit, lower-priority flexible columns SHALL shrink before higher-priority columns, but no declared column SHALL become inaccessible solely because of terminal width. Values wider than a column's maximum or current allocated width SHALL be truncated at a display-cell boundary with an ellipsis, while the complete sanitized value remains available in item detail.
 
@@ -260,15 +267,23 @@ Every item detail SHALL use one reusable scrollable key-value page with determin
 
 ### Requirement: Command, Filter, and Help Chrome
 
-The shell SHALL own one bordered command/filter bar for both `:` resource and action commands and `/` table filtering. It SHALL appear only while one of those modes is active, return its rows to the page when closed, and use shared input, completion, validation, cancellation, and history behavior. A shared help dialog SHALL derive its content from the keybinding registry and current page capabilities rather than from separately maintained help text.
+The shell SHALL own one command/filter prompt for both `:` resource and action commands and `/` table filtering. While active and three terminal rows are available, the prompt SHALL render as one complete full-width border with a middle input row, use mode-specific semantic border color, and display `🦖>` for resource commands or `🦕/` for filters followed by the current input and any completion suffix through shared prompt styles. The underlying input widget SHALL NOT add a second prompt token. It SHALL appear only while one of those modes is active, return all of its rows to the page when closed, and use shared input, completion, validation, cancellation, and history behavior. Resource completion SHALL be derived only from globally addressable views and scoped views whose bindings are currently available. It SHALL update an inline visually muted suffix after every edit; `Up` and `Down` SHALL cycle deterministic matching candidates; and `Tab`, `Right`, or `Ctrl+F` SHALL accept the displayed suffix. Filter history SHALL remain available without fabricating resource suggestions. A shared help dialog SHALL derive its content from the keybinding registry and current page capabilities rather than from separately maintained help text.
 
 #### Scenario: Enter and leave filter mode
 
 - GIVEN a resource table is visible with a persistent error
 - WHEN the user enters `/` filter mode, changes the filter, and presses `Esc`
-- THEN one shared command/filter bar SHALL appear and then close
-- AND the table SHALL regain the released page rows
+- THEN one shared fully bordered command/filter prompt SHALL appear and then close
+- AND the table SHALL regain the three released page rows
 - AND the alert SHALL remain on the same bottom row throughout
+
+#### Scenario: Complete an available resource
+
+- GIVEN two addressable resource aliases match the current `:` input and one scoped view lacks its required binding
+- WHEN the user types, cycles the inline suggestions, and accepts one with `Right`
+- THEN candidates SHALL update after each edit in deterministic order
+- AND the accepted suffix SHALL complete the selected available resource without inserting the unavailable view
+- AND `Tab` and `Ctrl+F` SHALL provide the same acceptance behavior
 
 ### Requirement: Single Keybinding and Hint Registry
 
@@ -318,7 +333,7 @@ Successful initial list and detail reads, navigation reads, and background refre
 
 ### Requirement: Shared Dialog Host and Dialog Primitives
 
-One modal host SHALL display at most one centered help, choice, confirmation, or form dialog over the page frame without covering or relocating the breadcrumb footer or alert rail. All dialogs SHALL use one frame, focus trap, button, cancellation, validation-summary, sizing, and in-flight policy. `Esc` SHALL cancel when cancellation is safe, focus navigation SHALL be consistent, destructive confirmation SHALL initially focus the safe cancel action, and an in-flight operation SHALL not be submitted twice.
+One modal host SHALL display at most one centered help, choice, confirmation, or form dialog over the page frame without covering or relocating the breadcrumb footer or alert rail. All dialogs SHALL use one frame, focus trap, button, cancellation, validation-summary, sizing, in-flight, and action-footer policy. In a form footer, navigation and choice actions SHALL precede cancellation and submission, the `Esc` cancellation action SHALL appear immediately left of the `Enter` submission action, and `Enter` SHALL be the rightmost action with the primary semantic style. `Esc` SHALL cancel when cancellation is safe, focus navigation SHALL be consistent, destructive confirmation SHALL initially focus the safe cancel action, and an in-flight operation SHALL not be submitted twice.
 
 #### Scenario: Confirm a destructive operation safely
 
@@ -331,7 +346,7 @@ One modal host SHALL display at most one centered help, choice, confirmation, or
 
 ### Requirement: Schema-Driven Form Dialog
 
-Create, update, and non-CRUD request input SHALL use one schema-driven form dialog generated from operation parameter and request-body descriptors. Fields SHALL be grouped with every required field before every optional field while preserving deterministic descriptor order within each group. Each field heading SHALL show only its sanitized field name, type including format when present, and the word `required` or `optional`; it SHALL NOT expose implementation labels such as `body field`, `query parameter`, or descriptor locations. The field name SHALL use the theme's bright normal foreground with emphasis, while type and requiredness SHALL use muted metadata styling. Forms SHALL use type- and format-appropriate inputs, exclude read-only properties, permit write-only input, constrain enum choices, preserve explicit zero values, and validate before submission. Invalid fields SHALL render inline through the shared field-error component and summarize through the fixed alert rail. Submission SHALL be disabled while invalid or in flight. A supported JSON request body that cannot be represented structurally MAY use a generic raw-JSON field named `body`; the runtime SHALL NOT add an operation-specific hand-written form.
+Create, update, and non-CRUD request input SHALL use one schema-driven form dialog generated from operation parameter and request-body descriptors. Fields SHALL be grouped with every required field before every optional field while preserving deterministic descriptor order within each group. Each field heading SHALL show only its sanitized field name, type including format when present, and the word `required` or `optional`; it SHALL NOT expose implementation labels such as `body field`, `query parameter`, or descriptor locations. Within a form, the shared component SHALL measure display-cell widths and pad the field-name, type, and requiredness columns so every value input begins in the same display column. The field name SHALL use the theme's bright normal foreground with emphasis, while type and requiredness SHALL use muted metadata styling. Forms SHALL use type- and format-appropriate inputs, exclude read-only properties, permit write-only input, constrain enum choices, preserve explicit zero values, and validate before submission. Invalid fields SHALL render a danger-colored `!` and sanitized message beneath the corresponding aligned input through the shared field-error component and summarize through the fixed alert rail. Submission SHALL be disabled while invalid or in flight. A supported JSON request body that cannot be represented structurally MAY use a generic raw-JSON field named `body`; the runtime SHALL NOT add an operation-specific hand-written form.
 
 #### Scenario: Reuse one form for different operations
 
@@ -339,6 +354,9 @@ Create, update, and non-CRUD request input SHALL use one schema-driven form dial
 - WHEN each operation opens its input dialog
 - THEN the same form component SHALL render all required fields before all optional fields and retain deterministic order inside those groups
 - AND each field heading SHALL contain only its visually emphasized name, muted type, and muted required or optional state
+- AND every input SHALL begin at the same display-cell offset despite different field-name and type widths
+- AND an invalid field SHALL show its `!` marker and safe diagnostic in the danger style beneath that input
+- AND the footer SHALL end with `Esc` followed by a primary-styled `Enter`
 - AND read-only fields SHALL be absent
 - AND invalid or duplicate submission SHALL make no request
 
@@ -365,7 +383,7 @@ The header SHALL show refresh activity and the last successful refresh age. A pa
 
 ### Requirement: Presentation Component Conformance Gate
 
-The generated runtime SHALL have deterministic component tests for spacious, constrained, and extremely narrow continuous layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover semantic header key/value rows, contextual header shortcut ordering, equal shortcut-column widths, aligned Action offsets after variable-width key tokens, the six-row bound, responsive elision and restoration, help and dispatch parity, and absence of a duplicate bottom shortcut strip. Tests SHALL also cover centered and semantically segmented resource titles, complete-badge breadcrumb rendering and responsive ancestor elision, content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, required-first field ordering, simplified semantic field headings, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, shortcut-palette layout, breadcrumb layout, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
+The generated runtime SHALL have deterministic component tests for spacious, constrained, and extremely narrow continuous layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover semantic header key/value rows, contextual header shortcut ordering, equal shortcut-column widths, aligned Action offsets after variable-width key tokens, the six-row bound, responsive elision and restoration, help and dispatch parity, and absence of a duplicate bottom shortcut strip. Tests SHALL also cover centered and semantically segmented resource titles, live and persisted `</filter>` title badges with filtered counts, complete-badge breadcrumb rendering and responsive ancestor elision, content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, a complete three-row mode-colored prompt border, dinosaur icon and singular-prefix rendering, deterministic inline resource completion and cycling, every completion acceptance key, unavailable-view exclusion, filter history, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, required-first field ordering, display-cell-aligned form columns and inputs, danger-styled inline field errors, cancel/submit footer ordering, primary submit styling, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, command/filter prompt layout, form-column layout, dialog-action layout, shortcut-palette layout, breadcrumb layout, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
 
 #### Scenario: Prove one presentation system
 
@@ -543,13 +561,27 @@ Every DELETE operation SHALL require the shared destructive confirmation dialog 
 
 ### Requirement: Resource Switching, Tables, Filtering, and Detail
 
-The runtime SHALL provide a resource switcher for globally addressable views and for scoped views whose required bindings are available in the current stack. It SHALL accept each validated alias, render list responses as selectable tables, apply `/` filtering across sanitized visible column values, and provide a scrollable item-detail view containing all readable response fields. `Enter` SHALL follow an available descriptor relationship from the selected row; when more than one edge is available it SHALL present a deterministic relationship chooser rather than choose a parent or child implicitly. A detail command SHALL remain available independently of child navigation.
+The runtime SHALL open on a top-level resource catalog containing every descriptor collection view, including scoped views that are not currently addressable. Each catalog row SHALL identify the resource, its required scope or global status, and whether it is currently ready or requires context. `Enter` on an addressable catalog row SHALL push that resource onto the navigation stack and perform its documented read; `Enter` on a row with unsatisfied scope bindings SHALL perform no request and SHALL explain the required context through the fixed alert rail. `Esc` from a top-level resource SHALL return to the catalog without issuing a catalog request.
+
+The runtime SHALL also provide a resource switcher for globally addressable views and for scoped views whose required bindings are available in the current stack. It SHALL accept each validated alias and expose the same available labels, view identifiers, and aliases to the shared deterministic inline completion model. A successful switch SHALL retain the catalog as the navigation root. The runtime SHALL render list responses as selectable tables, apply `/` filtering across sanitized visible column values, and provide a scrollable item-detail view containing all readable response fields. `Enter` SHALL follow an available descriptor relationship from the selected row; when more than one edge is available it SHALL present a deterministic relationship chooser rather than choose a parent or child implicitly. A detail command SHALL remain available independently of child navigation.
+
+#### Scenario: Browse the complete resource catalog
+
+- GIVEN descriptors define a global Dinosaurs collection and a scoped Fossils collection requiring `dinosaur_id`
+- WHEN the TUI starts
+- THEN the initial catalog SHALL contain both resources without making an API request
+- AND Dinosaurs SHALL be ready while Fossils SHALL state that context is required
+- WHEN the user selects Dinosaurs
+- THEN the runtime SHALL push Dinosaurs, execute its documented list operation, and retain Resources as the breadcrumb root
+- WHEN the user returns and selects Fossils without the required binding
+- THEN the runtime SHALL make no request and SHALL identify `dinosaur_id` as required context
 
 #### Scenario: Browse without resource-specific code
 
 - GIVEN generated descriptors define Dinosaurs and Fossils with different columns
 - WHEN the user switches resources, filters rows, selects one, and opens detail
 - THEN the generic runtime SHALL render the descriptor-defined table and detail fields
+- AND the resource switcher SHALL complete only views available under the current bindings
 - AND no behavior SHALL depend on the literal names Dinosaur or Fossil
 
 #### Scenario: Select among multiple child edges
@@ -685,7 +717,7 @@ Fixture tests SHALL prove that controls and request inputs are projected only fr
 
 ### Requirement: Runtime Navigation Gate
 
-Generated-runtime acceptance tests SHALL use `httptest` with `teatest` to send user keystrokes and assert resource switching, aliases, filtering, selected-row navigation, relationship choice, details, `Enter` push, `Esc` pop, breadcrumbs, multi-parent history, and inline API errors. The test SHALL exercise generated descriptors rather than a resource-specific fake runtime.
+Generated-runtime acceptance tests SHALL use `httptest` with `teatest` to send user keystrokes and assert initial catalog rendering without an API request, global and unavailable scoped catalog rows, catalog entry and return, protected left-prefix sort markers under truncation, resource switching, aliases, filtering, selected-row navigation, relationship choice, details, `Enter` push, `Esc` pop, breadcrumbs, multi-parent history, and inline API errors. The test SHALL exercise generated descriptors rather than a resource-specific fake runtime.
 
 #### Scenario: Enter and Escape preserve scope
 

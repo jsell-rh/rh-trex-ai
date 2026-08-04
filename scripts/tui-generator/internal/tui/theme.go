@@ -9,6 +9,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+const commandPromptHorizontalOverhead = 7
+
 // Theme is the only source of terminal color and style policy. Components
 // consume semantic tokens instead of choosing presentation values themselves.
 type Theme struct {
@@ -25,6 +27,13 @@ type Theme struct {
 	FieldTitleStyle    lipgloss.Style
 	BreadcrumbAncestor lipgloss.Style
 	BreadcrumbActive   lipgloss.Style
+	CommandBorder      lipgloss.Style
+	FilterBorder       lipgloss.Style
+	PromptIcon         lipgloss.Style
+	PromptPrefix       lipgloss.Style
+	PromptSuggestion   lipgloss.Style
+	PromptCursor       lipgloss.Style
+	FilterBadge        lipgloss.Style
 	plain              bool
 }
 
@@ -43,6 +52,13 @@ func DefaultTheme() Theme {
 		FieldTitleStyle:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")),
 		BreadcrumbAncestor: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("214")),
 		BreadcrumbActive:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("69")),
+		CommandBorder:      lipgloss.NewStyle().Foreground(lipgloss.Color("42")),
+		FilterBorder:       lipgloss.NewStyle().Foreground(lipgloss.Color("51")),
+		PromptIcon:         lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
+		PromptPrefix:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75")),
+		PromptSuggestion:   lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
+		PromptCursor:       lipgloss.NewStyle().Reverse(true),
+		FilterBadge:        lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("42")),
 	}
 }
 
@@ -68,6 +84,15 @@ func (theme Theme) FieldTitle(value string) string {
 	return theme.render(theme.FieldTitleStyle, value)
 }
 func (theme Theme) FieldMetadata(value string) string { return theme.Subtle(value) }
+func (theme Theme) FieldError(value string) string    { return theme.Negative(value) }
+
+func (theme Theme) DialogAction(hint ShortcutHint, primary bool) string {
+	value := "[" + hint.Key + "] " + hint.Description
+	if primary {
+		return theme.Header(value)
+	}
+	return theme.FieldMetadata(value)
+}
 
 func (theme Theme) Shortcut(shortcut ShortcutHint, keyWidth int) string {
 	tokenWidth := ansi.StringWidth("<" + shortcut.Key + ">")
@@ -93,6 +118,9 @@ func (theme Theme) FrameLabel(title PageFrameTitle, state PageState) string {
 	if title.Count != nil {
 		label += theme.Standard("[") + theme.Caution(fmt.Sprintf("%d", *title.Count)) + theme.Standard("]")
 	}
+	if filter := SanitizeCell(title.Filter); filter != "" {
+		label += " " + theme.render(theme.FilterBadge, "</"+filter+">")
+	}
 	if state != PageReady {
 		label += theme.Standard(" · ") + theme.PageState(state, string(state))
 	}
@@ -112,14 +140,30 @@ func (theme Theme) PageState(state PageState, value string) string {
 	}
 }
 
-func (theme Theme) CommandBar(value string, width int) string {
-	if width <= 0 {
+func (theme Theme) CommandPromptInputWidth(width int) int {
+	return max(0, width-commandPromptHorizontalOverhead)
+}
+
+func (theme Theme) CommandPrompt(view CommandPromptView, width, height int) string {
+	if width <= 0 || height <= 0 {
 		return ""
 	}
-	if width == 1 {
-		return "│"
+	icon, prefix := "🦕", "/"
+	border := theme.FilterBorder
+	if view.Kind == CommandResource {
+		icon, prefix = "🦖", ">"
+		border = theme.CommandBorder
 	}
-	return "│" + theme.ClampLine(value, max(0, width-2)) + "│"
+	content := " " + theme.render(theme.PromptIcon, icon) + theme.render(theme.PromptPrefix, prefix) + " " + view.Input
+	if height < 3 || width < 2 {
+		return fitBlock(content, width, height, theme)
+	}
+	contentWidth := width - 2
+	style := lipgloss.NewStyle().Width(contentWidth).Height(1).Border(lipgloss.NormalBorder())
+	if !theme.plain {
+		style = style.Inherit(border)
+	}
+	return fitBlock(style.Render(theme.ClampLine(content, contentWidth)), width, height, theme)
 }
 
 func (theme Theme) TableStyles() table.Styles {

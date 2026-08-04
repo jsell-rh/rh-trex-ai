@@ -31,12 +31,13 @@ func CalculateShellLayout(width, height int, commandActive bool, headerLines []s
 		}
 	}
 	reserve(&result.AlertRows)
-	if len(headerLines) > 0 || len(shortcuts) > 0 {
-		reserve(&result.HeaderRows)
-	}
 	reserve(&result.BreadcrumbRows)
 	if commandActive {
-		reserve(&result.CommandRows)
+		result.CommandRows = min(3, remaining)
+		remaining -= result.CommandRows
+	}
+	if len(headerLines) > 0 || len(shortcuts) > 0 {
+		reserve(&result.HeaderRows)
 	}
 
 	maxHeaderRows := result.HeaderRows

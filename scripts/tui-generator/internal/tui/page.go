@@ -28,6 +28,7 @@ type Page interface {
 	Title() string
 	Scope() string
 	Count() *int
+	Filter() string
 	State() PageState
 	Content() string
 	Actions() []LocalAction
@@ -37,6 +38,7 @@ type SemanticPage struct {
 	PageTitle   string
 	PageScope   string
 	PageCount   *int
+	PageFilter  string
 	PageState   PageState
 	PageContent string
 	PageActions []LocalAction
@@ -45,6 +47,7 @@ type SemanticPage struct {
 func (page SemanticPage) Title() string    { return page.PageTitle }
 func (page SemanticPage) Scope() string    { return page.PageScope }
 func (page SemanticPage) Count() *int      { return page.PageCount }
+func (page SemanticPage) Filter() string   { return page.PageFilter }
 func (page SemanticPage) State() PageState { return page.PageState }
 func (page SemanticPage) Content() string  { return page.PageContent }
 func (page SemanticPage) Actions() []LocalAction {
@@ -86,6 +89,7 @@ type PageFrameTitle struct {
 	Kind    string
 	Context string
 	Count   *int
+	Filter  string
 }
 
 func pageFrameTitle(page Page) PageFrameTitle {
@@ -97,5 +101,6 @@ func pageFrameTitle(page Page) PageFrameTitle {
 		Kind:    SanitizeCell(page.Title()),
 		Context: context,
 		Count:   page.Count(),
+		Filter:  SanitizeCell(page.Filter()),
 	}
 }

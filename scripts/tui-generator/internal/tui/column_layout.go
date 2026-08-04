@@ -190,7 +190,7 @@ func columnsDisplayWidth(widths []int, start, end int) int {
 func columnTitle(view View, column Column) string {
 	title := SanitizeCell(column.Label)
 	if column.Property == view.DefaultSort {
-		title += " ↑"
+		title = "↑ " + title
 	}
 	return title
 }

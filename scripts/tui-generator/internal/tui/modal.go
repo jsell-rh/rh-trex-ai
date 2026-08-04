@@ -19,7 +19,7 @@ type Dialog interface {
 	Kind() DialogKind
 	Title() string
 	Content(Theme) string
-	Footer() string
+	Footer(Theme) string
 }
 
 type StaticDialog struct {
@@ -34,7 +34,7 @@ func (dialog StaticDialog) Title() string    { return dialog.DialogTitle }
 func (dialog StaticDialog) Content(Theme) string {
 	return dialog.DialogContent
 }
-func (dialog StaticDialog) Footer() string { return dialog.DialogFooter }
+func (dialog StaticDialog) Footer(Theme) string { return dialog.DialogFooter }
 
 type ModalHost struct{ dialog Dialog }
 
@@ -49,7 +49,7 @@ func (host ModalHost) Render(base string, width, height int, theme Theme) string
 		return base
 	}
 	content := host.dialog.Content(theme)
-	if footer := host.dialog.Footer(); footer != "" {
+	if footer := host.dialog.Footer(theme); footer != "" {
 		content += "\n\n" + footer
 	}
 	dialogWidth := min(max(12, ansi.StringWidth(host.dialog.Title())+4), max(1, width-2))

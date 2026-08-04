@@ -44,7 +44,7 @@ func (component *ResourceTableComponent) Configure(view View, width, height, off
 	for _, index := range layout.Visible {
 		title := columnTitle(displayView, view.Columns[index])
 		if view.Columns[index].Property == component.sortProperty && component.sortDescending {
-			title = strings.TrimSuffix(title, " ↑") + " ↓"
+			title = "↓ " + strings.TrimPrefix(title, "↑ ")
 		}
 		columns = append(columns, table.Column{Title: title, Width: layout.Widths[index]})
 	}

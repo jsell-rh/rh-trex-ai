@@ -56,6 +56,9 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(110, 32))
 	t.Cleanup(func() { _ = testModel.Quit() })
 
+	waitForTexts(t, testModel, "Resources(all)[4]", "Children", "requires context")
+	testModel.Type(":parents")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Alpha")
 	output := readOutput(t, testModel.Output())
 	if bytes.Contains(output, []byte("b3duZWQ=")) || bytes.Contains(output, []byte("\x1b]52")) {
@@ -99,8 +102,86 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 		t.Fatal(err)
 	}
 	final, ok := testModel.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
-	if !ok || len(final.frames) != 2 || final.frames[0].TargetViewID != "accounts" || final.frames[1].TargetViewID != "account" {
+	if !ok || len(final.frames) != 3 || !final.frames[0].Catalog || final.frames[1].TargetViewID != "accounts" || final.frames[2].TargetViewID != "account" {
 		t.Fatalf("multi-parent history = %#v", final)
+	}
+}
+
+func TestResourceCatalogShowsAllViewsAndGuardsMissingContext(t *testing.T) {
+	requests := make(chan string, 8)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests <- request.URL.EscapedPath()
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"items":[{"id":"parent-1","name":"Alpha"}]}`)
+	}))
+	defer server.Close()
+
+	model, err := NewModel(runtimeTestDescriptor(server.URL), ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(100, 30))
+	t.Cleanup(func() { _ = testModel.Quit() })
+
+	waitForTexts(t, testModel, "Resources(all)[4]", "Accounts", "Children", "Parents", "Public Children", "requires context")
+	select {
+	case path := <-requests:
+		t.Fatalf("catalog startup made request %q", path)
+	default:
+	}
+
+	// Catalog rows sort by resource name: Accounts, Children, Parents, Public Children.
+	testModel.Send(tea.KeyMsg{Type: tea.KeyDown})
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "Children requires context: parent_id")
+	select {
+	case path := <-requests:
+		t.Fatalf("unavailable scoped resource made request %q", path)
+	default:
+	}
+
+	testModel.Send(tea.KeyMsg{Type: tea.KeyDown})
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForTexts(t, testModel, "Alpha", "<resources>", "<parents>")
+	select {
+	case path := <-requests:
+		if path != "/parents" {
+			t.Fatalf("catalog selection requested %q, want /parents", path)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("catalog selection made no request")
+	}
+
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	waitForText(t, testModel, "Resources(all)[4]")
+	select {
+	case path := <-requests:
+		t.Fatalf("returning to catalog made request %q", path)
+	default:
+	}
+}
+
+func TestResourceCatalogDoesNotRequireAGlobalCollection(t *testing.T) {
+	descriptor := Descriptor{
+		Title: "Scoped only",
+		Views: []View{{
+			ID: "children", Kind: "collection", Label: "Children", ScopeParameters: []string{"parent_id"},
+			OperationIDs: []string{"listChildren"}, ListOperationID: "listChildren",
+		}},
+		Operations: []Operation{{
+			ID: "listChildren", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/parents/"}, {Parameter: "parent_id"}, {Literal: "/children"}},
+			Parameters: []Parameter{{Name: "parent_id", In: "path", Required: true}}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true},
+		}},
+	}
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: "http://localhost:8000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !model.onCatalog() || len(model.rows) != 1 || model.rows[0].Raw["status"] != "requires context" || model.Init() == nil {
+		t.Fatalf("scoped-only catalog state = catalog %v, rows %#v", model.onCatalog(), model.rows)
+	}
+	if command := model.loadCurrent(); command != nil {
+		t.Fatal("scoped-only catalog created a read command")
 	}
 }
 
@@ -141,6 +222,8 @@ func TestStreamingIsIncrementalBoundedSanitizedAndCancelable(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(100, 30))
 	t.Cleanup(func() { _ = testModel.Quit() })
+	waitForText(t, testModel, "Resources(all)[1]")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "One")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	waitForText(t, testModel, "streamEvents")
@@ -209,11 +292,13 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(110, 30))
 	t.Cleanup(func() { _ = testModel.Quit() })
+	waitForText(t, testModel, "Resources(all)[1]")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Things(all)[0]")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	waitForTexts(t, testModel, "archiveThing", "POST · 4 input(s)")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "thing_id  string · required")
+	waitForText(t, testModel, "thing_id  string  required")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "thing_id is required")
 	select {
@@ -223,13 +308,13 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 	}
 	testModel.Type("thing/7")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "X-Reason  string · required")
+	waitForText(t, testModel, "X-Reason  string  required")
 	testModel.Type("operator requested")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "name  string · required")
+	waitForText(t, testModel, "name      string  required")
 	testModel.Type("updated")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "thing_id  string · optional")
+	waitForText(t, testModel, "thing_id  string  optional")
 	testModel.Type("notify")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Operation completed")
@@ -260,7 +345,9 @@ func TestRoutineReadsRemainSilentAndPostActionRefreshPreservesSuccess(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	frameID := model.frames[0].ID
+	activateResource(t, model, "things")
+	active := &model.frames[len(model.frames)-1]
+	frameID := active.ID
 	listResult := operationResultMsg{
 		viewID: "things", frameID: frameID, operationID: "listThings",
 		result: Result{Status: http.StatusOK, Body: map[string]any{"items": []any{map[string]any{"id": "thing-1"}}}},
@@ -270,7 +357,7 @@ func TestRoutineReadsRemainSilentAndPostActionRefreshPreservesSuccess(t *testing
 		t.Fatalf("initial list created alert %#v", alert)
 	}
 
-	model.frames[0].TargetViewID = "thing"
+	active.TargetViewID = "thing"
 	_, _ = model.handleResult(operationResultMsg{
 		viewID: "thing", frameID: frameID, operationID: "getThing",
 		result: Result{Status: http.StatusOK, Body: map[string]any{"id": "thing-1"}},
@@ -279,7 +366,7 @@ func TestRoutineReadsRemainSilentAndPostActionRefreshPreservesSuccess(t *testing
 		t.Fatalf("detail read created alert %#v", alert)
 	}
 
-	model.frames[0].TargetViewID = "things"
+	active.TargetViewID = "things"
 	listResult.background = true
 	_, _ = model.handleResult(listResult)
 	if alert, present := model.shell.Alerts.Active(); present {
@@ -344,6 +431,8 @@ func TestAPIErrorIsInlineAndTerminalSafe(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(90, 25))
 	t.Cleanup(func() { _ = testModel.Quit() })
+	waitForText(t, testModel, "Resources(all)[1]")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "safe error")
 	output := readOutput(t, testModel.Output())
 	if bytes.Contains(output, []byte("clipboard")) || bytes.Contains(output, []byte("\x1b]52")) {
@@ -384,6 +473,8 @@ func TestBreadcrumbSanitizesAPIDerivedIdentityWithTeatest(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(90, 25))
 	t.Cleanup(func() { _ = testModel.Quit() })
+	waitForText(t, testModel, "Resources(all)[1]")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Safe")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForTexts(t, testModel, "Safe detail", "<items>", "<item[one]>")
@@ -595,6 +686,8 @@ func TestRefreshFailurePreservesContentAndLaterSuccessRestoresSelection(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateResource(t, model, "things")
+	active := &model.frames[len(model.frames)-1]
 	initial := model.loadCurrent()
 	if initial == nil {
 		t.Fatal("initial load command is nil")
@@ -608,15 +701,15 @@ func TestRefreshFailurePreservesContentAndLaterSuccessRestoresSelection(t *testi
 
 	fail = true
 	refresh := model.refreshCurrent()
-	if refresh == nil || !model.frames[0].InFlight || !model.frames[0].Refreshing {
-		t.Fatalf("refresh did not enter in-flight state: %#v", model.frames[0])
+	if refresh == nil || !active.InFlight || !active.Refreshing {
+		t.Fatalf("refresh did not enter in-flight state: %#v", active)
 	}
 	if duplicate := model.refreshCurrent(); duplicate != nil {
 		t.Fatal("overlapping refresh command was created")
 	}
 	_, _ = model.handleResult(refresh().(operationResultMsg))
-	if len(model.rows) != 2 || !model.frames[0].Stale || model.frames[0].InFlight || model.frames[0].Refreshing {
-		t.Fatalf("failed refresh state = frame %#v, rows %d", model.frames[0], len(model.rows))
+	if len(model.rows) != 2 || !active.Stale || active.InFlight || active.Refreshing {
+		t.Fatalf("failed refresh state = frame %#v, rows %d", active, len(model.rows))
 	}
 	alert, present := model.shell.Alerts.Active()
 	if !present || alert.Severity != AlertError || !strings.Contains(alert.Summary, "HTTP 503") {
@@ -627,11 +720,11 @@ func TestRefreshFailurePreservesContentAndLaterSuccessRestoresSelection(t *testi
 	refresh = model.refreshCurrent()
 	_, _ = model.handleResult(refresh().(operationResultMsg))
 	selected = model.selectedRow()
-	if selected == nil || selected.Identity != "two" || model.frames[0].Stale || model.frames[0].LastSuccess.IsZero() {
-		t.Fatalf("successful refresh state = frame %#v, selection %#v", model.frames[0], selected)
+	if selected == nil || selected.Identity != "two" || active.Stale || active.LastSuccess.IsZero() {
+		t.Fatalf("successful refresh state = frame %#v, selection %#v", active, selected)
 	}
 	for _, candidate := range model.shell.Alerts.alerts {
-		if candidate.Key == model.refreshAlertKey(model.frames[0].ID) {
+		if candidate.Key == model.refreshAlertKey(active.ID) {
 			t.Fatalf("successful retry retained refresh error %#v", candidate)
 		}
 	}
@@ -650,10 +743,12 @@ func TestInvalidSuccessfulReadShapeDoesNotRecordRefreshSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateResource(t, model, "parents")
+	active := &model.frames[len(model.frames)-1]
 	request := model.loadCurrent()
 	_, _ = model.handleResult(request().(operationResultMsg))
-	if !model.frames[0].LoadFailed || !model.frames[0].LastSuccess.IsZero() {
-		t.Fatalf("invalid response shape recorded success: %#v", model.frames[0])
+	if !active.LoadFailed || !active.LastSuccess.IsZero() {
+		t.Fatalf("invalid response shape recorded success: %#v", active)
 	}
 	alert, present := model.shell.Alerts.Active()
 	if !present || alert.Severity != AlertError || !strings.Contains(alert.Summary, "items") {
@@ -667,25 +762,27 @@ func TestPollingCanBeDisabledAndStalenessUsesConfiguredThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateResource(t, model, "parents")
+	active := &model.frames[len(model.frames)-1]
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	model.frames[0].LastSuccess = now
+	active.LastSuccess = now
 	model.nextRefresh = now
 	_, _ = model.Update(presentationPulseMsg{now: now.Add(20 * time.Second)})
-	if model.frames[0].InFlight {
+	if active.InFlight {
 		t.Fatal("disabled polling started a request")
 	}
-	if !model.frames[0].Stale {
+	if !active.Stale {
 		t.Fatal("page did not become stale after the fifteen-second floor")
 	}
 
 	model.refreshInterval = 10 * time.Second
-	model.frames[0].Stale = false
+	active.Stale = false
 	model.updateStaleness(now.Add(29 * time.Second))
-	if model.frames[0].Stale {
+	if active.Stale {
 		t.Fatal("page became stale before three configured intervals")
 	}
 	model.updateStaleness(now.Add(31 * time.Second))
-	if !model.frames[0].Stale {
+	if !active.Stale {
 		t.Fatal("page did not become stale after three configured intervals")
 	}
 }
@@ -701,15 +798,17 @@ func TestHiddenFrameResultIsIgnoredWithoutLeavingRequestStuck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateResource(t, model, "parents")
 	initial := model.loadCurrent()
 	_, _ = model.handleResult(initial().(operationResultMsg))
 	refresh := model.refreshCurrent()
-	parentID := model.frames[0].ID
+	parentIndex := len(model.frames) - 1
+	parentID := model.frames[parentIndex].ID
 	model.frames = append(model.frames, Frame{ID: model.newFrameID(), TargetViewID: "accounts", Label: "Accounts", Bindings: map[string]any{}})
 	before := len(model.rows)
 	_, _ = model.handleResult(refresh().(operationResultMsg))
-	if model.frames[0].InFlight || model.frames[0].Refreshing {
-		t.Fatalf("hidden frame %d remained in flight: %#v", parentID, model.frames[0])
+	if model.frames[parentIndex].InFlight || model.frames[parentIndex].Refreshing {
+		t.Fatalf("hidden frame %d remained in flight: %#v", parentID, model.frames[parentIndex])
 	}
 	if len(model.rows) != before {
 		t.Fatalf("hidden result changed active content: %d -> %d", before, len(model.rows))
@@ -747,6 +846,7 @@ func TestOperationHotkeyUsesSafeConfirmationAndSubmitsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateResource(t, model, "things")
 	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	if command != nil || model.mode != modeConfirmation || model.confirmation == nil || model.confirmation.confirmFocus {
 		t.Fatalf("hotkey confirmation state = mode %v, dialog %#v, command %v", model.mode, model.confirmation, command)
@@ -774,6 +874,95 @@ func TestOperationHotkeyUsesSafeConfirmationAndSubmitsOnce(t *testing.T) {
 	if actionRequests != 1 || model.mode != modeBrowse {
 		t.Fatalf("post-action state = requests %d, mode %v", actionRequests, model.mode)
 	}
+}
+
+func TestResourcePromptCompletesOnlyCurrentlyAddressableViews(t *testing.T) {
+	model, err := NewModel(runtimeTestDescriptor("http://localhost:8000"), ClientConfig{BaseURL: "http://localhost:8000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates := model.resourceCommandCandidates()
+	joined := strings.Join(candidates, "|")
+	if !strings.Contains(joined, "Accounts") || !strings.Contains(joined, "ac") || !strings.Contains(joined, "Public Children") {
+		t.Fatalf("addressable resource candidates = %q", joined)
+	}
+	if containsString(candidates, "Children") || containsString(candidates, "ch") {
+		t.Fatalf("unbound scoped view leaked into candidates: %q", joined)
+	}
+
+	for _, keyType := range []tea.KeyType{tea.KeyTab, tea.KeyRight, tea.KeyCtrlF} {
+		model.mode = modeSwitch
+		model.CommandBar.Begin(CommandResource, "")
+		model.CommandBar.SetSuggestions(candidates)
+		_, _ = model.handleInputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+		if model.CommandBar.CurrentSuggestion() != "ac" {
+			t.Fatalf("initial inline suggestion for %v = %q", keyType, model.CommandBar.CurrentSuggestion())
+		}
+		if rendered := model.CommandBar.View(PlainTheme(), 40).Input; !strings.Contains(rendered, "ac") {
+			t.Fatalf("inline completion suffix absent for %v: %q", keyType, rendered)
+		}
+		_, _ = model.handleInputKey(tea.KeyMsg{Type: keyType})
+		if model.CommandBar.Value() != "ac" {
+			t.Fatalf("acceptance key %v completed %q", keyType, model.CommandBar.Value())
+		}
+	}
+
+	model.mode = modeSwitch
+	model.CommandBar.Begin(CommandResource, "")
+	model.CommandBar.SetSuggestions(candidates)
+	_, _ = model.handleInputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	_, _ = model.handleInputKey(tea.KeyMsg{Type: tea.KeyUp})
+	if model.CommandBar.CurrentSuggestion() != "Accounts" {
+		t.Fatalf("Up did not cycle to the next deterministic suggestion: %q", model.CommandBar.CurrentSuggestion())
+	}
+	_, _ = model.handleInputKey(tea.KeyMsg{Type: tea.KeyDown})
+	if model.CommandBar.CurrentSuggestion() != "ac" {
+		t.Fatalf("Down did not cycle to the previous deterministic suggestion: %q", model.CommandBar.CurrentSuggestion())
+	}
+}
+
+func TestLiveFilterPersistsInFrameTitleUntilCleared(t *testing.T) {
+	model, err := NewModel(runtimeTestDescriptor("http://localhost:8000"), ClientConfig{BaseURL: "http://localhost:8000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := model.currentView()
+	if view == nil {
+		t.Fatal("missing root view")
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	_, _ = model.handleInputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha")})
+	live := pageFrameTitle(model.semanticPage(*view))
+	if live.Filter != "alpha" {
+		t.Fatalf("live filter title = %#v", live)
+	}
+	_, _ = model.handleInputKey(tea.KeyMsg{Type: tea.KeyEsc})
+	persisted := pageFrameTitle(model.semanticPage(*view))
+	if model.mode != modeCatalog || persisted.Filter != "alpha" {
+		t.Fatalf("closed prompt lost active filter: mode %v, title %#v", model.mode, persisted)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	cleared := pageFrameTitle(model.semanticPage(*view))
+	if cleared.Filter != "" {
+		t.Fatalf("cleared filter retained frame badge: %#v", cleared)
+	}
+}
+
+func activateResource(t *testing.T, model *Model, viewID string) {
+	t.Helper()
+	view := model.descriptor.View(viewID)
+	if view == nil {
+		t.Fatalf("missing test resource %q", viewID)
+	}
+	catalog := model.catalogFrame()
+	catalog.CatalogSelection = view.ID
+	model.frames = []Frame{
+		catalog,
+		{ID: model.newFrameID(), TargetViewID: view.ID, Label: view.Label, Bindings: map[string]any{}},
+	}
+	model.mode = modeBrowse
+	model.filter = ""
+	model.rebuildTable(*view)
 }
 
 func runtimeTestDescriptor(server string) Descriptor {

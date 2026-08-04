@@ -25,6 +25,8 @@ type Row struct {
 
 type Frame struct {
 	ID               uint64
+	Catalog          bool
+	CatalogSelection string
 	EdgeID           string
 	SourceViewID     string
 	SelectedIdentity string
@@ -53,6 +55,7 @@ type mode int
 
 const (
 	modeBrowse mode = iota
+	modeCatalog
 	modeFilter
 	modeSwitch
 	modeRelationships
@@ -137,27 +140,27 @@ func NewModel(descriptor Descriptor, config ClientConfig) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	root := firstRootView(descriptor)
-	if root == nil {
-		return nil, fmt.Errorf("descriptor has no globally addressable list view")
+	if !hasCollectionView(descriptor) {
+		return nil, fmt.Errorf("descriptor has no collection view")
 	}
 	detail := viewport.New(80, 20)
 	model := &Model{
 		descriptor: descriptor, client: client, CommandBar: NewCommandBar(), DetailStreamComponent: DetailStreamComponent{detail: detail, autoscroll: true},
 		width: 100, height: 30,
-		frames:          []Frame{{ID: 1, TargetViewID: root.ID, Label: root.Label, Bindings: map[string]any{}}},
+		frames:          []Frame{{ID: 1, Catalog: true, Label: resourceCatalogLabel, Bindings: map[string]any{}}},
+		mode:            modeCatalog,
 		shell:           NewShell(config.Token),
 		refreshInterval: config.RefreshInterval, nextFrameID: 1, now: time.Now,
 	}
 	if config.RefreshInterval > 0 {
 		model.nextRefresh = model.now().Add(config.RefreshInterval)
 	}
-	model.rebuildTable(*root)
+	model.rebuildCatalog()
 	return model, nil
 }
 
 func (model *Model) Init() tea.Cmd {
-	return tea.Batch(model.loadCurrent(), presentationPulse())
+	return presentationPulse()
 }
 
 func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -229,7 +232,7 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return model.handleKey(typed)
 	}
-	if model.mode == modeBrowse {
+	if model.mode == modeCatalog || model.mode == modeBrowse {
 		var command tea.Cmd
 		model.table, command = model.table.Update(message)
 		return model, command
@@ -249,12 +252,9 @@ func (model *Model) View() string {
 		return model.shell.Render(ShellView{Page: SemanticPage{PageTitle: "Unavailable", PageState: PageFatal, PageContent: "No view"}}, model.width, model.height)
 	}
 	page := model.semanticPage(*view)
-	command := ""
+	command := model.commandPrompt()
 	switch model.mode {
-	case modeFilter:
-		command = model.CommandBar.View("/")
-	case modeSwitch:
-		command = model.CommandBar.View(":")
+	case modeFilter, modeSwitch:
 	case modeRelationships, modeActions:
 		title := "Relationships"
 		if model.mode == modeActions {
@@ -286,7 +286,15 @@ func (model *Model) View() string {
 	return model.shell.Render(presentation, model.width, model.height)
 }
 
-func (model *Model) shellView(view View, page Page, command string) ShellView {
+func (model *Model) commandPrompt() *CommandPromptView {
+	if model.mode != modeFilter && model.mode != modeSwitch {
+		return nil
+	}
+	view := model.CommandBar.View(model.shell.Theme, model.width)
+	return &view
+}
+
+func (model *Model) shellView(view View, page Page, command *CommandPromptView) ShellView {
 	return ShellView{
 		Header: HeaderModel{
 			Service: model.descriptor.Title, Origin: model.serverOrigin(),
@@ -323,7 +331,7 @@ func (model *Model) semanticPage(view View) Page {
 	if state == PageReady && !model.loading && count == 0 {
 		state = PageEmpty
 	}
-	return ResourceTablePage{SemanticPage{PageTitle: view.Label, PageScope: model.tableScope(), PageCount: &count, PageState: state, PageContent: model.tableView(), PageActions: actions}}
+	return ResourceTablePage{SemanticPage{PageTitle: view.Label, PageScope: model.tableScope(), PageCount: &count, PageFilter: model.filter, PageState: state, PageContent: model.tableView(), PageActions: actions}}
 }
 
 func (model *Model) applicableKeys() []BindingID {
@@ -338,9 +346,11 @@ func (model *Model) applicableKeysForMode(activeMode mode) []BindingID {
 	case modeAlertDetails:
 		keys = []BindingID{KeyCancel, KeyHelp, KeyDismissAlert, KeyForceQuit}
 	case modeFilter, modeSwitch:
-		keys = []BindingID{KeySubmit, KeyCancel, KeyHistoryPrevious, KeyHistoryNext, KeyHelp, KeyForceQuit}
+		keys = []BindingID{KeySubmit, KeyCancel, KeyHelp, KeyForceQuit}
 		if activeMode == modeSwitch {
-			keys = append(keys, KeyNextFocus)
+			keys = append(keys, KeySuggestionNext, KeySuggestionPrev, KeyAcceptSuggestion)
+		} else {
+			keys = append(keys, KeyHistoryPrevious, KeyHistoryNext)
 		}
 	case modeRelationships, modeActions:
 		keys = []BindingID{KeySubmit, KeyCancel, KeyHelp, KeyForceQuit}
@@ -350,6 +360,8 @@ func (model *Model) applicableKeysForMode(activeMode mode) []BindingID {
 		keys = []BindingID{KeyNextFocus, KeySubmit, KeyCancel, KeyHelp, KeyForceQuit}
 	case modeDetail:
 		keys = []BindingID{KeyNavigate, KeyCancel, KeyHelp, KeyQuit}
+	case modeCatalog:
+		keys = []BindingID{KeyCommand, KeyFilter, KeyNavigate, KeySortNext, KeySortDirection, KeyHelp, KeyQuit}
 	default:
 		keys = []BindingID{KeyCommand, KeyFilter, KeyNavigate, KeyDetail, KeyActions, KeySortNext, KeySortDirection, KeyCancel, KeyHelp, KeyQuit}
 	}
@@ -358,10 +370,10 @@ func (model *Model) applicableKeysForMode(activeMode mode) []BindingID {
 			keys = append(keys, KeyAlertDetails, KeyDismissAlert)
 		}
 	}
-	if activeMode == modeBrowse && model.leftOverflow > 0 {
+	if (activeMode == modeCatalog || activeMode == modeBrowse) && model.leftOverflow > 0 {
 		keys = append(keys, KeyColumnsLeft)
 	}
-	if activeMode == modeBrowse && model.rightOverflow > 0 {
+	if (activeMode == modeCatalog || activeMode == modeBrowse) && model.rightOverflow > 0 {
 		keys = append(keys, KeyColumnsRight)
 	}
 	if view := model.currentView(); activeMode == modeDetail && view != nil && view.Kind == "stream" {
@@ -425,7 +437,7 @@ func (model *Model) tableView() string {
 
 func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	model.ensurePresentation()
-	if model.shell.Keys.Matches(key, KeyForceQuit) || (model.shell.Keys.Matches(key, KeyQuit) && (model.mode == modeBrowse || model.mode == modeDetail)) {
+	if model.shell.Keys.Matches(key, KeyForceQuit) || (model.shell.Keys.Matches(key, KeyQuit) && (model.mode == modeCatalog || model.mode == modeBrowse || model.mode == modeDetail)) {
 		model.cancelStream()
 		return model, tea.Quit
 	}
@@ -501,11 +513,15 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch {
 	case model.shell.Keys.Matches(key, KeyFilter):
+		model.previousMode = model.mode
 		model.mode = modeFilter
 		return model, model.CommandBar.Begin(CommandFilter, model.filter)
 	case model.shell.Keys.Matches(key, KeyCommand):
+		model.previousMode = model.mode
 		model.mode = modeSwitch
-		return model, model.CommandBar.Begin(CommandResource, "")
+		command := model.CommandBar.Begin(CommandResource, "")
+		model.CommandBar.SetSuggestions(model.resourceCommandCandidates())
+		return model, command
 	case model.shell.Keys.Matches(key, KeyCancel):
 		if model.filter != "" {
 			model.filter = ""
@@ -516,6 +532,9 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case model.shell.Keys.Matches(key, KeyNavigate):
 		return model.followRelationships()
 	case model.shell.Keys.Matches(key, KeyDetail):
+		if model.onCatalog() {
+			return model, nil
+		}
 		row := model.selectedRow()
 		if row == nil {
 			model.alertWarning("selection", "No selected item")
@@ -525,6 +544,9 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		model.mode = modeDetail
 		return model, nil
 	case model.shell.Keys.Matches(key, KeyActions):
+		if model.onCatalog() {
+			return model, nil
+		}
 		return model.openActions()
 	case model.shell.Keys.Matches(key, KeySortNext):
 		if view := model.currentView(); view != nil {
@@ -553,21 +575,26 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (model *Model) handleInputKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if model.shell.Keys.Matches(key, KeyCancel) {
-		model.mode = modeBrowse
+		model.mode = model.commandReturnMode()
 		model.CommandBar.Close()
 		return model, nil
 	}
-	if model.shell.Keys.Matches(key, KeyHistoryPrevious) {
+	if model.mode == modeFilter && model.shell.Keys.Matches(key, KeyHistoryPrevious) {
 		model.CommandBar.MoveHistory(-1)
 		return model, nil
 	}
-	if model.shell.Keys.Matches(key, KeyHistoryNext) {
+	if model.mode == modeFilter && model.shell.Keys.Matches(key, KeyHistoryNext) {
 		model.CommandBar.MoveHistory(1)
 		return model, nil
 	}
-	if model.mode == modeSwitch && model.shell.Keys.Matches(key, KeyNextFocus) {
-		model.completeResourceCommand()
-		return model, nil
+	if model.mode == modeSwitch && (model.shell.Keys.Matches(key, KeySuggestionNext) || model.shell.Keys.Matches(key, KeySuggestionPrev)) {
+		return model, model.CommandBar.Update(key)
+	}
+	if model.mode == modeSwitch && model.shell.Keys.Matches(key, KeyAcceptSuggestion) {
+		if model.CommandBar.AcceptSuggestion() {
+			return model, nil
+		}
+		return model, model.CommandBar.Update(key)
 	}
 	if model.shell.Keys.Matches(key, KeySubmit) {
 		value := strings.TrimSpace(model.CommandBar.Value())
@@ -576,20 +603,17 @@ func (model *Model) handleInputKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if model.mode == modeFilter {
 			model.filter = value
 			model.applyFilter()
-			model.mode = modeBrowse
+			model.mode = model.commandReturnMode()
 			return model, nil
 		}
 		view := model.addressableView(value)
 		if view == nil {
 			model.alertError("command", "Unknown or unavailable resource: "+value)
-			model.mode = modeBrowse
+			model.mode = model.commandReturnMode()
 			return model, nil
 		}
 		bindings := availableBindings(model.frames)
-		model.frames = []Frame{{ID: model.newFrameID(), TargetViewID: view.ID, Label: view.Label, Bindings: bindings}}
-		model.mode = modeBrowse
-		model.rebuildTable(*view)
-		return model, model.loadCurrent()
+		return model, model.openResourceView(view, bindings, true)
 	}
 	command := model.CommandBar.Update(key)
 	if model.mode == modeFilter {
@@ -623,6 +647,9 @@ func (model *Model) handleChooserKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (model *Model) followRelationships() (tea.Model, tea.Cmd) {
+	if model.onCatalog() {
+		return model.openCatalogSelection()
+	}
 	view := model.currentView()
 	if view == nil {
 		return model, nil
@@ -690,6 +717,13 @@ func (model *Model) popFrame() (tea.Model, tea.Cmd) {
 	model.restoreIdentity = model.frames[len(model.frames)-1].SelectedIdentity
 	model.frames = model.frames[:len(model.frames)-1]
 	view := model.currentView()
+	if model.onCatalog() {
+		model.filter = ""
+		model.mode = modeCatalog
+		model.restoreIdentity = model.frames[len(model.frames)-1].CatalogSelection
+		model.rebuildCatalog()
+		return model, nil
+	}
 	model.mode = modeBrowse
 	if view != nil {
 		model.rebuildTable(*view)
@@ -843,7 +877,7 @@ func (model *Model) loadCurrent() tea.Cmd {
 
 func (model *Model) loadCurrentWithPurpose(background bool) tea.Cmd {
 	view := model.currentView()
-	if view == nil {
+	if view == nil || model.onCatalog() {
 		return nil
 	}
 	if len(model.frames) > 0 && model.frames[len(model.frames)-1].InFlight {
@@ -873,7 +907,7 @@ func (model *Model) loadCurrentWithPurpose(background bool) tea.Cmd {
 
 func (model *Model) refreshCurrent() tea.Cmd {
 	view := model.currentView()
-	if view == nil || len(model.frames) == 0 || view.Kind == "stream" || len(view.StreamOperationIDs) > 0 && view.ListOperationID == "" && view.GetOperationID == "" {
+	if view == nil || len(model.frames) == 0 || model.onCatalog() || view.Kind == "stream" || len(view.StreamOperationIDs) > 0 && view.ListOperationID == "" && view.GetOperationID == "" {
 		return nil
 	}
 	frame := &model.frames[len(model.frames)-1]
@@ -1118,7 +1152,15 @@ func (model *Model) currentView() *View {
 	if len(model.frames) == 0 {
 		return nil
 	}
+	if model.frames[len(model.frames)-1].Catalog {
+		view := resourceCatalogView()
+		return &view
+	}
 	return model.descriptor.View(model.frames[len(model.frames)-1].TargetViewID)
+}
+
+func (model *Model) onCatalog() bool {
+	return len(model.frames) > 0 && model.frames[len(model.frames)-1].Catalog
 }
 
 func (model *Model) addressableView(command string) *View {
@@ -1133,7 +1175,7 @@ func (model *Model) addressableView(command string) *View {
 			return view
 		}
 		for _, alias := range view.Aliases {
-			if alias == command {
+			if strings.EqualFold(alias, command) {
 				return view
 			}
 		}
@@ -1141,25 +1183,32 @@ func (model *Model) addressableView(command string) *View {
 	return nil
 }
 
-func (model *Model) completeResourceCommand() {
-	prefix := strings.ToLower(strings.TrimSpace(model.CommandBar.Value()))
+func (model *Model) resourceCommandCandidates() []string {
 	bindings := availableBindings(model.frames)
 	var candidates []string
+	seen := make(map[string]bool)
 	for index := range model.descriptor.Views {
 		view := &model.descriptor.Views[index]
 		if view.ListOperationID == "" || !bindingsCover(view.ScopeParameters, bindings) {
 			continue
 		}
 		for _, candidate := range append([]string{view.Label, view.ID}, view.Aliases...) {
-			if prefix == "" || strings.HasPrefix(strings.ToLower(candidate), prefix) {
+			candidate = strings.TrimSpace(SanitizeCell(candidate))
+			key := strings.ToLower(candidate)
+			if candidate != "" && !seen[key] {
+				seen[key] = true
 				candidates = append(candidates, candidate)
 			}
 		}
 	}
-	sort.Strings(candidates)
-	if len(candidates) > 0 {
-		model.CommandBar.SetValue(candidates[0])
-	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left, right := strings.ToLower(candidates[i]), strings.ToLower(candidates[j])
+		if left == right {
+			return candidates[i] < candidates[j]
+		}
+		return left < right
+	})
+	return candidates
 }
 
 func (model *Model) breadcrumb() []BreadcrumbSegment {
@@ -1187,13 +1236,7 @@ func (model *Model) pageContentSize() (int, int) {
 		layout := CalculateShellLayout(model.width, model.height, false, nil, nil)
 		return layout.ContentWidth, layout.ContentHeight
 	}
-	command := ""
-	if model.mode == modeFilter {
-		command = model.CommandBar.View("/")
-	} else if model.mode == modeSwitch {
-		command = model.CommandBar.View(":")
-	}
-	presentation := model.shellView(*view, model.semanticPage(*view), command)
+	presentation := model.shellView(*view, model.semanticPage(*view), model.commandPrompt())
 	layout := model.shell.Layout(presentation, model.width, model.height)
 	return layout.ContentWidth, layout.ContentHeight
 }
@@ -1246,7 +1289,7 @@ func (model *Model) currentRefreshing() bool {
 }
 
 func (model *Model) updateStaleness(now time.Time) {
-	if len(model.frames) == 0 {
+	if len(model.frames) == 0 || model.onCatalog() {
 		return
 	}
 	frame := &model.frames[len(model.frames)-1]
@@ -1292,14 +1335,13 @@ func (model *Model) cancelStream() {
 	model.DetailStreamComponent.Cancel()
 }
 
-func firstRootView(descriptor Descriptor) *View {
-	for index := range descriptor.Views {
-		view := &descriptor.Views[index]
-		if view.ListOperationID != "" && len(view.ScopeParameters) == 0 {
-			return view
+func hasCollectionView(descriptor Descriptor) bool {
+	for _, view := range descriptor.Views {
+		if view.ListOperationID != "" {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 func newChooser(columns []table.Column, rows []table.Row) table.Model {

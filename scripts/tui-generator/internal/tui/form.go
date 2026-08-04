@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type formFieldDescriptor struct {
@@ -125,21 +126,36 @@ func newFormField(descriptor formFieldDescriptor) formField {
 
 func (form *FormDialog) Kind() DialogKind { return DialogForm }
 func (form *FormDialog) Title() string    { return form.title }
-func (form *FormDialog) Footer() string {
-	keys := []BindingID{KeyNextFocus, KeyPreviousFocus, KeySubmit, KeyCancel}
+func (form *FormDialog) Footer(theme Theme) string {
+	keys := []BindingID{KeyNextFocus, KeyPreviousFocus}
 	for index := range form.fields {
 		if len(form.fields[index].descriptor.Enum) > 0 {
 			keys = append(keys, KeyChoicePrevious, KeyChoiceNext)
 			break
 		}
 	}
-	return form.keys.Hints(keys...)
+	keys = append(keys, KeyCancel, KeySubmit)
+	parts := make([]string, 0, len(keys))
+	for _, id := range keys {
+		if hint, present := form.keys.Hint(id); present {
+			parts = append(parts, theme.DialogAction(hint, id == KeySubmit))
+		}
+	}
+	return strings.Join(parts, "  ")
 }
 
 func (form *FormDialog) Content(theme Theme) string {
 	if len(form.fields) == 0 {
 		return "No input is required."
 	}
+	nameWidth, typeWidth, requiredWidth := 0, 0, 0
+	for index := range form.fields {
+		field := &form.fields[index]
+		nameWidth = max(nameWidth, ansi.StringWidth(SanitizeCell(field.descriptor.Name)))
+		typeWidth = max(typeWidth, ansi.StringWidth(formFieldType(field.descriptor)))
+		requiredWidth = max(requiredWidth, ansi.StringWidth(formFieldRequiredness(field.descriptor)))
+	}
+	inputOffset := 2 + nameWidth + 2 + typeWidth + 2 + requiredWidth + 2
 	var lines []string
 	for index := range form.fields {
 		field := &form.fields[index]
@@ -147,14 +163,8 @@ func (form *FormDialog) Content(theme Theme) string {
 		if index == form.focus {
 			marker = "> "
 		}
-		required := "optional"
-		if field.descriptor.Required {
-			required = "required"
-		}
-		typeName := field.descriptor.Type
-		if field.descriptor.Format != "" {
-			typeName += "/" + field.descriptor.Format
-		}
+		required := formFieldRequiredness(field.descriptor)
+		typeName := formFieldType(field.descriptor)
 		value := field.input.View()
 		if len(field.descriptor.Enum) > 0 {
 			choice := field.input.Value()
@@ -163,17 +173,34 @@ func (form *FormDialog) Content(theme Theme) string {
 			}
 			value = "‹ " + SanitizeCell(choice) + " ›"
 		}
-		heading := theme.FieldTitle(SanitizeCell(field.descriptor.Name))
-		metadata := theme.FieldMetadata(typeName + " · " + required)
-		lines = append(lines, marker+heading+"  "+metadata+": "+value)
+		name := SanitizeCell(field.descriptor.Name)
+		heading := theme.FieldTitle(name) + strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name)))
+		typeMetadata := theme.FieldMetadata(typeName) + strings.Repeat(" ", max(0, typeWidth-ansi.StringWidth(typeName)))
+		requiredMetadata := theme.FieldMetadata(required) + strings.Repeat(" ", max(0, requiredWidth-ansi.StringWidth(required)))
+		lines = append(lines, marker+heading+"  "+typeMetadata+"  "+requiredMetadata+": "+value)
 		if field.err != "" {
-			lines = append(lines, "    ! "+SanitizeCell(field.err))
+			lines = append(lines, strings.Repeat(" ", inputOffset)+theme.FieldError("! "+SanitizeCell(field.err)))
 		}
 	}
 	if form.inFlight {
 		lines = append(lines, "", "Submitting…")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formFieldType(descriptor formFieldDescriptor) string {
+	typeName := SanitizeCell(descriptor.Type)
+	if descriptor.Format != "" {
+		typeName += "/" + SanitizeCell(descriptor.Format)
+	}
+	return typeName
+}
+
+func formFieldRequiredness(descriptor formFieldDescriptor) string {
+	if descriptor.Required {
+		return "required"
+	}
+	return "optional"
 }
 
 func (form *FormDialog) Update(message tea.KeyMsg) (FormEvent, tea.Cmd) {
@@ -417,7 +444,7 @@ func NewConfirmationDialog(label string, confirmation Confirmation, keys KeyRegi
 
 func (dialog *ConfirmationDialog) Kind() DialogKind { return DialogConfirmation }
 func (dialog *ConfirmationDialog) Title() string    { return dialog.confirmation.Title }
-func (dialog *ConfirmationDialog) Footer() string {
+func (dialog *ConfirmationDialog) Footer(Theme) string {
 	return dialog.keys.Hints(KeyNextFocus, KeySubmit, KeyCancel)
 }
 func (dialog *ConfirmationDialog) Content(Theme) string {

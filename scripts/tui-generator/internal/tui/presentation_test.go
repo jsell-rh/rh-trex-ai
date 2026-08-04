@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -22,6 +23,15 @@ func TestContinuousLayoutNeverProducesNegativeDimensions(t *testing.T) {
 		if layout.HeaderRows+layout.CommandRows+layout.PageRows+layout.BreadcrumbRows+layout.AlertRows != layout.Height {
 			t.Fatalf("layout for %v does not consume terminal height: %#v", size, layout)
 		}
+	}
+	active := CalculateShellLayout(80, 20, true, []string{"service", "context", "status"}, shortcuts)
+	inactive := CalculateShellLayout(80, 20, false, []string{"service", "context", "status"}, shortcuts)
+	if active.CommandRows != 3 || inactive.CommandRows != 0 || inactive.PageRows-active.PageRows != 3 {
+		t.Fatalf("prompt allocation did not return exactly three rows: active %#v, inactive %#v", active, inactive)
+	}
+	short := CalculateShellLayout(20, 3, true, []string{"service"}, shortcuts)
+	if short.CommandRows != 1 || short.AlertRows != 1 || short.BreadcrumbRows != 1 {
+		t.Fatalf("extremely short fallback allocation = %#v", short)
 	}
 }
 
@@ -216,13 +226,14 @@ func TestShellSnapshotKeepsAlertOnFinalRowAcrossTransitions(t *testing.T) {
 		t.Fatalf("spacious snapshot lost semantic chrome:\n%s", spacious)
 	}
 
-	view.Command = "/ waiting"
+	view.Command = &CommandPromptView{Kind: CommandFilter, Input: "waiting"}
 	command := shell.Render(view, 64, 12)
 	assertRail("command", command, 12)
-	if !strings.Contains(command, "/ waiting") {
+	if !strings.Contains(command, "🦕/ waiting") {
 		t.Fatalf("command snapshot omitted command bar:\n%s", command)
 	}
 
+	view.Command = nil
 	shell.Modal.Open(StaticDialog{DialogKind: DialogHelp, DialogTitle: "Help", DialogContent: "? help", DialogFooter: "esc close"})
 	dialog := shell.Render(view, 64, 12)
 	assertRail("dialog", dialog, 12)
@@ -277,6 +288,50 @@ func TestFrameTitleIsCenteredAndUsesSemanticSegments(t *testing.T) {
 	if theme.Primary.GetForeground() == theme.Secondary.GetForeground() ||
 		theme.Secondary.GetForeground() == theme.Warning.GetForeground() {
 		t.Fatal("kind, context, and count do not have distinct semantic colors")
+	}
+}
+
+func TestFrameTitleAppendsSanitizedFilterBadgeAndFilteredCount(t *testing.T) {
+	count := 2
+	title := PageFrameTitle{Kind: "Dinosaur", Context: "all", Count: &count, Filter: "arch\x1b]52;c;bad\a ae"}
+	label := PlainTheme().FrameLabel(title, PageReady)
+	if label != "Dinosaur(all)[2] </arch ae>" {
+		t.Fatalf("filtered frame label = %q", label)
+	}
+	frame := PlainTheme().ResourceFrame(title, PageReady, "", 52, 3)
+	if !strings.Contains(strings.Split(frame, "\n")[0], "Dinosaur(all)[2] </arch ae>") {
+		t.Fatalf("filter badge absent from centered frame title:\n%s", frame)
+	}
+	if got := PlainTheme().FrameLabel(PageFrameTitle{Kind: "Dinosaur", Context: "all", Count: &count}, PageReady); strings.Contains(got, "</") {
+		t.Fatalf("cleared filter retained badge: %q", got)
+	}
+	if _, absent := DefaultTheme().FilterBadge.GetBackground().(lipgloss.NoColor); absent {
+		t.Fatal("filter badge has no distinct semantic background")
+	}
+}
+
+func TestCommandPromptUsesCompleteModeSpecificBorder(t *testing.T) {
+	theme := PlainTheme()
+	resource := theme.CommandPrompt(CommandPromptView{Kind: CommandResource, Input: "dinosaurs"}, 28, 3)
+	lines := strings.Split(resource, "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], "┌") || !strings.HasSuffix(lines[0], "┐") ||
+		!strings.HasPrefix(lines[1], "│ 🦖> dinosaurs") || !strings.HasSuffix(lines[1], "│") ||
+		!strings.HasPrefix(lines[2], "└") || !strings.HasSuffix(lines[2], "┘") {
+		t.Fatalf("resource prompt is not fully bordered:\n%s", resource)
+	}
+	filter := theme.CommandPrompt(CommandPromptView{Kind: CommandFilter, Input: "search"}, 28, 3)
+	if !strings.Contains(filter, "🦕/ search") {
+		t.Fatalf("filter prompt lacks mode-specific prompt UI:\n%s", filter)
+	}
+	bar := NewCommandBar()
+	bar.Begin(CommandResource, "d")
+	actual := theme.CommandPrompt(bar.View(theme, 28), 28, 3)
+	if middle := strings.Split(actual, "\n")[1]; strings.Count(middle, ">") != 1 {
+		t.Fatalf("resource prompt contains a duplicate widget prefix: %q", middle)
+	}
+	defaultTheme := DefaultTheme()
+	if defaultTheme.CommandBorder.GetForeground() == defaultTheme.FilterBorder.GetForeground() {
+		t.Fatal("resource and filter prompts share one border color")
 	}
 }
 
@@ -345,11 +400,20 @@ func TestFormDialogFocusEnumValidationZeroAndDuplicateSubmit(t *testing.T) {
 		t.Fatalf("deterministic fields = %#v", form.fields)
 	}
 	content := form.Content(PlainTheme())
-	if !strings.Contains(content, "count  integer · required") ||
-		!strings.Contains(content, "dry_run  boolean · optional") ||
+	if !strings.Contains(content, "count") || !strings.Contains(content, "integer") || !strings.Contains(content, "required") ||
+		!strings.Contains(content, "dry_run") || !strings.Contains(content, "boolean") || !strings.Contains(content, "optional") ||
 		strings.Contains(content, "body field") || strings.Contains(content, "query parameter") ||
 		!strings.Contains(content, "‹ new ›") {
 		t.Fatalf("form content = %q", content)
+	}
+	inputColumns := make(map[int]bool)
+	for _, line := range strings.Split(content, "\n") {
+		if separator := strings.Index(line, ": "); separator >= 0 {
+			inputColumns[ansi.StringWidth(line[:separator+2])] = true
+		}
+	}
+	if len(inputColumns) != 1 {
+		t.Fatalf("form inputs are not display-cell aligned: columns %v\n%s", inputColumns, content)
 	}
 	theme := DefaultTheme()
 	if !theme.FieldTitleStyle.GetBold() || theme.FieldTitleStyle.GetForeground() == theme.Muted.GetForeground() {
@@ -364,6 +428,39 @@ func TestFormDialogFocusEnumValidationZeroAndDuplicateSubmit(t *testing.T) {
 	duplicate, _ := form.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if duplicate.Submitted {
 		t.Fatal("in-flight form accepted duplicate submission")
+	}
+}
+
+func TestFormInlineErrorAndFooterUseSharedSemanticStyles(t *testing.T) {
+	keys := DefaultKeyRegistry()
+	form := NewFormDialog(Operation{
+		ID: "createItem",
+		RequestBody: &RequestBody{Required: true, Fields: []InputField{
+			{Name: "observed_at", Type: "string", Format: "date-time", Required: true},
+			{Name: "名", Type: "integer", Required: false},
+		}},
+	}, nil, keys)
+	form.fields[0].input.SetValue("invalid")
+	event, _ := form.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !event.Invalid {
+		t.Fatal("invalid date-time field was accepted")
+	}
+	theme := DefaultTheme()
+	content := form.Content(theme)
+	wantError := theme.FieldError("! must be an RFC 3339 date-time")
+	if !strings.Contains(content, wantError) {
+		t.Fatalf("inline validation does not use the danger style:\n%s", content)
+	}
+
+	footer := form.Footer(PlainTheme())
+	cancel := "[esc] back/cancel"
+	submit := "[enter] select/submit"
+	if cancelAt, submitAt := strings.Index(footer, cancel), strings.Index(footer, submit); cancelAt < 0 || submitAt < 0 || cancelAt > submitAt || !strings.HasSuffix(footer, submit) {
+		t.Fatalf("form footer does not end with cancel then submit: %q", footer)
+	}
+	submitHint, present := keys.Hint(KeySubmit)
+	if !present || !strings.Contains(form.Footer(theme), theme.DialogAction(submitHint, true)) {
+		t.Fatalf("form submit action is not primary-styled: %q", form.Footer(theme))
 	}
 }
 
@@ -431,6 +528,40 @@ func TestResourceTableSortAndCommandHistoryAreShared(t *testing.T) {
 	bar.MoveHistory(-1)
 	if bar.Value() != "records" {
 		t.Fatalf("previous command history = %q", bar.Value())
+	}
+	bar.Begin(CommandResource, "a")
+	bar.SetSuggestions([]string{"accounts"})
+	if bar.CurrentSuggestion() != "accounts" {
+		t.Fatalf("resource suggestion = %q", bar.CurrentSuggestion())
+	}
+	bar.Begin(CommandFilter, "a")
+	if bar.CurrentSuggestion() != "" {
+		t.Fatalf("filter inherited resource suggestion %q", bar.CurrentSuggestion())
+	}
+}
+
+func TestNarrowSortedHeaderKeepsDirectionAsLeftPrefix(t *testing.T) {
+	view := View{
+		ID: "records", Kind: "collection", DefaultSort: "description",
+		Columns: []Column{{Property: "description", Label: "VERY LONG DESCRIPTION", Type: "string"}},
+	}
+	component := ResourceTableComponent{}
+	component.Reset(view, PlainTheme(), 8, 5, 0)
+	component.SetRows(view, []map[string]any{{"description": "value"}}, "", "", 8, 5, 0)
+	if title := component.table.Columns()[0].Title; title != "↑ VERY LONG DESCRIPTION" {
+		t.Fatalf("ascending header title = %q", title)
+	}
+	if rendered := ansi.Strip(component.View()); !strings.Contains(rendered, "↑") || !strings.Contains(rendered, "…") {
+		t.Fatalf("narrow ascending header hid sort prefix: %q", rendered)
+	}
+
+	component.ReverseSort()
+	component.Configure(view, 8, 5, 0)
+	if title := component.table.Columns()[0].Title; title != "↓ VERY LONG DESCRIPTION" {
+		t.Fatalf("descending header title = %q", title)
+	}
+	if rendered := ansi.Strip(component.View()); !strings.Contains(rendered, "↓") || !strings.Contains(rendered, "…") {
+		t.Fatalf("narrow descending header hid sort prefix: %q", rendered)
 	}
 }
 

@@ -56,6 +56,45 @@ func badPage(segments []BreadcrumbSegment, theme Theme) { RenderBreadcrumb(segme
 	}
 }
 
+func TestArchitectureGateRejectsSyntheticPageOwnedPromptLayout(t *testing.T) {
+	failures := presentationPolicyViolations(map[string]string{"bad_page.go": `package tui
+func badPage(theme Theme, view CommandPromptView) { theme.CommandPrompt(view, 80, 3) }
+`})
+	if len(failures) == 0 {
+		t.Fatal("architecture gate accepted page-owned command/filter prompt layout")
+	}
+}
+
+func TestArchitectureGateRejectsSyntheticPageOwnedFormAndDialogActionLayout(t *testing.T) {
+	failures := presentationPolicyViolations(map[string]string{"bad_page.go": `package tui
+func badPage(theme Theme, hint ShortcutHint, field formFieldDescriptor) {
+	_ = formFieldType(field)
+	_ = theme.DialogAction(hint, true)
+}
+`})
+	if len(failures) < 2 {
+		t.Fatalf("architecture gate accepted duplicated form/dialog action policy: %v", failures)
+	}
+}
+
+func TestResourceCatalogUsesSharedTableAndPageContracts(t *testing.T) {
+	data, err := os.ReadFile("catalog.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	for _, required := range []string{"model.rebuildTable(view)", "model.setRows(view, model.catalogItems())"} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("catalog does not use shared resource-table contract %q", required)
+		}
+	}
+	for _, duplicated := range []string{"table.New(", "sort.SliceStable("} {
+		if strings.Contains(source, duplicated) {
+			t.Fatalf("catalog duplicates shared table policy %q", duplicated)
+		}
+	}
+}
+
 func presentationPolicyViolations(sources map[string]string) []string {
 	var failures []string
 	for name, source := range sources {
@@ -76,6 +115,15 @@ func presentationPolicyViolations(sources map[string]string) []string {
 		}
 		if name != "breadcrumb.go" && name != "shell.go" && strings.Contains(source, "RenderBreadcrumb(") {
 			failures = append(failures, name+": breadcrumb layout outside breadcrumb.go")
+		}
+		if name != "theme.go" && name != "shell.go" && strings.Contains(source, ".CommandPrompt(") {
+			failures = append(failures, name+": command/filter prompt layout outside theme.go")
+		}
+		if name != "form.go" && strings.Contains(source, "formFieldType(") {
+			failures = append(failures, name+": form-column layout outside form.go")
+		}
+		if name != "theme.go" && name != "form.go" && strings.Contains(source, ".DialogAction(") {
+			failures = append(failures, name+": dialog-action layout outside form.go")
 		}
 		if name != "alert.go" && (strings.Contains(source, "alertLifetime") || strings.Contains(source, "alertPriority(")) {
 			failures = append(failures, name+": alert lifetime/priority outside alert.go")
