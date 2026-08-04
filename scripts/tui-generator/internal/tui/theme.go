@@ -57,6 +57,10 @@ func (theme Theme) Caution(value string) string  { return theme.render(theme.War
 func (theme Theme) Negative(value string) string { return theme.render(theme.Danger, value) }
 func (theme Theme) Standard(value string) string { return theme.render(theme.Normal, value) }
 
+func (theme Theme) Shortcut(shortcut ShortcutHint) string {
+	return theme.Subtle("<") + theme.Emphasis(shortcut.Key) + theme.Subtle(">") + " " + theme.Standard(shortcut.Description)
+}
+
 func (theme Theme) CommandBar(value string, width int) string {
 	if width <= 0 {
 		return ""

@@ -17,7 +17,6 @@ type HeaderModel struct {
 	Refreshing    bool
 	LastSuccess   time.Time
 	Now           time.Time
-	Actions       []LocalAction
 }
 
 type ShellView struct {
@@ -39,34 +38,27 @@ func NewShell(token string) Shell {
 	return Shell{Theme: DefaultTheme(), Keys: DefaultKeyRegistry(), Alerts: NewAlertManager(token)}
 }
 
-func (shell *Shell) hintText(view ShellView) string {
-	hints := shell.Keys.Hints(view.HintIDs...)
+func (shell *Shell) shortcuts(view ShellView) []ShortcutHint {
 	var actions []LocalAction
-	if view.Page != nil {
+	if view.Page != nil && view.Command == "" && !shell.Modal.Active() {
 		actions = view.Page.Actions()
 	}
-	if actionHints := shell.Keys.ActionHints(actions); actionHints != "" && view.Command == "" && !shell.Modal.Active() {
-		if hints != "" {
-			hints += "  "
-		}
-		hints += actionHints
-	}
-	return hints
+	return shell.Keys.Shortcuts(view.HintIDs, actions)
 }
 
 func (shell *Shell) Layout(view ShellView, width, height int) ShellLayout {
-	return CalculateShellLayout(width, height, view.Command != "", headerMetadata(view.Header), shell.hintText(view))
+	return CalculateShellLayout(width, height, view.Command != "", headerMetadata(view.Header), shell.shortcuts(view))
 }
 
 func (shell *Shell) Render(view ShellView, width, height int) string {
 	if view.Page == nil {
 		view.Page = SemanticPage{PageTitle: "Unavailable", PageState: PageFatal, PageContent: "No page is available"}
 	}
-	hints := shell.hintText(view)
 	layout := shell.Layout(view, width, height)
 	rows := make([]string, 0, layout.Height)
 	if layout.HeaderRows > 0 {
 		rows = append(rows, shell.Theme.ClampLine(renderHeader(view.Header, layout, shell.Theme), layout.Width))
+		rows = append(rows, layout.ShortcutPalette.Render(shell.Theme, layout.Width)...)
 	}
 	if layout.CommandRows > 0 {
 		rows = append(rows, shell.Theme.CommandBar(view.Command, layout.Width))
@@ -78,9 +70,6 @@ func (shell *Shell) Render(view ShellView, width, height int) string {
 	}
 	if layout.BreadcrumbRows > 0 {
 		rows = append(rows, shell.Theme.ClampLine("› "+SanitizeCell(view.Breadcrumb), layout.Width))
-	}
-	if layout.HintRows > 0 {
-		rows = append(rows, shell.Theme.ClampLine(shell.Theme.Subtle(hints), layout.Width))
 	}
 	for len(rows) < layout.Height-layout.AlertRows {
 		rows = append(rows, shell.Theme.ClampLine("", layout.Width))
@@ -142,11 +131,6 @@ func headerMetadata(header HeaderModel) string {
 		}
 		age := max(time.Duration(0), now.Sub(header.LastSuccess)).Round(time.Second)
 		parts = append(parts, "refreshed "+age.String()+" ago")
-	}
-	for _, action := range header.Actions {
-		if action.Hotkey != "" {
-			parts = append(parts, "["+SanitizeCell(action.Hotkey)+"] "+SanitizeCell(action.Label))
-		}
 	}
 	return strings.Join(parts, " · ")
 }

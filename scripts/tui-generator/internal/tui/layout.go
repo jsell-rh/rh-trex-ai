@@ -5,20 +5,19 @@ import "github.com/charmbracelet/x/ansi"
 // ShellLayout is the sole authority for terminal-space allocation. It is
 // continuous: no width is treated as a different application mode.
 type ShellLayout struct {
-	Width, Height  int
-	HeaderRows     int
-	CommandRows    int
-	PageRows       int
-	BreadcrumbRows int
-	HintRows       int
-	AlertRows      int
-	ContentWidth   int
-	ContentHeight  int
-	ShowMetadata   bool
-	ShowHints      bool
+	Width, Height   int
+	HeaderRows      int
+	CommandRows     int
+	PageRows        int
+	BreadcrumbRows  int
+	AlertRows       int
+	ContentWidth    int
+	ContentHeight   int
+	ShowMetadata    bool
+	ShortcutPalette ShortcutPalette
 }
 
-func CalculateShellLayout(width, height int, commandActive bool, metadata, hints string) ShellLayout {
+func CalculateShellLayout(width, height int, commandActive bool, metadata string, shortcuts []ShortcutHint) ShellLayout {
 	result := ShellLayout{Width: max(0, width), Height: max(0, height)}
 	remaining := result.Height
 	reserve := func(target *int) {
@@ -33,9 +32,11 @@ func CalculateShellLayout(width, height int, commandActive bool, metadata, hints
 	if commandActive {
 		reserve(&result.CommandRows)
 	}
-	result.ShowHints = hints != "" && result.Width > 0 && ansi.StringWidth(hints) <= result.Width && remaining > 1
-	if result.ShowHints {
-		reserve(&result.HintRows)
+	shortcutRows := min(maxShortcutRows, max(0, remaining-1))
+	result.ShortcutPalette = LayoutShortcutPalette(shortcuts, result.Width, shortcutRows)
+	if result.HeaderRows > 0 {
+		result.HeaderRows += result.ShortcutPalette.Rows()
+		remaining -= result.ShortcutPalette.Rows()
 	}
 	result.PageRows = max(0, remaining)
 	result.ContentWidth = max(0, result.Width-2)

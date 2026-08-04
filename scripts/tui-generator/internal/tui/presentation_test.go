@@ -9,17 +9,137 @@ import (
 )
 
 func TestContinuousLayoutNeverProducesNegativeDimensions(t *testing.T) {
+	shortcuts := DefaultKeyRegistry().Shortcuts([]BindingID{KeyHelp, KeyCommand, KeyFilter, KeyCancel}, nil)
 	for _, size := range [][2]int{{120, 40}, {48, 12}, {8, 4}, {1, 1}, {0, 0}, {-5, -2}} {
-		layout := CalculateShellLayout(size[0], size[1], true, "metadata", "hints")
-		values := []int{layout.Width, layout.Height, layout.HeaderRows, layout.CommandRows, layout.PageRows, layout.BreadcrumbRows, layout.HintRows, layout.AlertRows, layout.ContentWidth, layout.ContentHeight}
+		layout := CalculateShellLayout(size[0], size[1], true, "metadata", shortcuts)
+		values := []int{layout.Width, layout.Height, layout.HeaderRows, layout.CommandRows, layout.PageRows, layout.BreadcrumbRows, layout.AlertRows, layout.ContentWidth, layout.ContentHeight}
 		for _, value := range values {
 			if value < 0 {
 				t.Fatalf("layout for %v contains negative value: %#v", size, layout)
 			}
 		}
-		if layout.HeaderRows+layout.CommandRows+layout.PageRows+layout.BreadcrumbRows+layout.HintRows+layout.AlertRows != layout.Height {
+		if layout.HeaderRows+layout.CommandRows+layout.PageRows+layout.BreadcrumbRows+layout.AlertRows != layout.Height {
 			t.Fatalf("layout for %v does not consume terminal height: %#v", size, layout)
 		}
+	}
+}
+
+func TestShortcutPaletteUsesRegistryOrderAndResponsivePriority(t *testing.T) {
+	registry := DefaultKeyRegistry()
+	actions := []LocalAction{{Label: "archive", Hotkey: "x"}}
+	shortcuts := registry.Shortcuts([]BindingID{
+		KeySortDirection, KeyQuit, KeyHelp, KeyCommand, KeyFilter, KeyCancel,
+		KeyNavigate, KeyDetail, KeyActions, KeySortNext,
+	}, actions)
+	if shortcuts[0].ID != KeyQuit || shortcuts[1].ID != KeyHelp || shortcuts[len(shortcuts)-1].Key != "x" {
+		t.Fatalf("shortcut registry order = %#v", shortcuts)
+	}
+
+	spacious := LayoutShortcutPalette(shortcuts, 80, maxShortcutRows)
+	if spacious.Hidden() != 0 || spacious.Rows() > maxShortcutRows || len(spacious.Shortcuts()) != len(shortcuts) {
+		t.Fatalf("spacious palette = %#v", spacious)
+	}
+	for _, shortcut := range spacious.Shortcuts() {
+		if !strings.Contains(registry.ShortcutHelp([]BindingID{
+			KeySortDirection, KeyQuit, KeyHelp, KeyCommand, KeyFilter, KeyCancel,
+			KeyNavigate, KeyDetail, KeyActions, KeySortNext,
+		}, actions), shortcut.Text()) {
+			t.Fatalf("header shortcut %q absent from help", shortcut.Text())
+		}
+	}
+
+	constrained := LayoutShortcutPalette(shortcuts, 24, 2)
+	if constrained.Hidden() == 0 || constrained.Rows() > 2 {
+		t.Fatalf("constrained palette did not elide: %#v", constrained)
+	}
+	foundHelp := false
+	for _, shortcut := range constrained.Shortcuts() {
+		foundHelp = foundHelp || shortcut.ID == KeyHelp
+	}
+	if !foundHelp {
+		t.Fatalf("constrained palette elided help: %#v", constrained.Shortcuts())
+	}
+	for _, line := range constrained.Render(PlainTheme(), 24) {
+		if strings.Contains(line, "…") {
+			t.Fatalf("palette rendered a partial shortcut: %q", line)
+		}
+	}
+	if tooNarrow := LayoutShortcutPalette(shortcuts, 6, maxShortcutRows); tooNarrow.Rows() != 0 {
+		t.Fatalf("palette rendered shortcuts without room for Help: %#v", tooNarrow)
+	}
+
+	aligned := LayoutShortcutPalette([]ShortcutHint{
+		{Key: "a", Description: "one", Order: 1},
+		{Key: "bb", Description: "two", Order: 2},
+		{Key: "c", Description: "three", Order: 3},
+		{Key: "dd", Description: "four", Order: 4},
+	}, 80, 2).Render(PlainTheme(), 80)
+	if len(aligned) != 2 || strings.Index(aligned[0], "<c>") != strings.Index(aligned[1], "<dd>") {
+		t.Fatalf("shortcut columns are not aligned: %q", aligned)
+	}
+
+	restored := LayoutShortcutPalette(shortcuts, 80, maxShortcutRows)
+	if len(restored.Shortcuts()) != len(spacious.Shortcuts()) {
+		t.Fatalf("restored palette did not recover entries: %#v", restored)
+	}
+	for index := range spacious.Shortcuts() {
+		if restored.Shortcuts()[index].Text() != spacious.Shortcuts()[index].Text() {
+			t.Fatalf("restored order changed at %d", index)
+		}
+	}
+}
+
+func TestShellRendersShortcutsOnlyInTopHeader(t *testing.T) {
+	shell := NewShell("")
+	shell.Theme = PlainTheme()
+	page := SemanticPage{
+		PageTitle: "Items", PageState: PageReady, PageContent: "one",
+		PageActions: []LocalAction{{Label: "archive", Hotkey: "x"}},
+	}
+	view := ShellView{
+		Header: HeaderModel{Service: "Inventory API", Page: "Items"},
+		Page:   page, Breadcrumb: "Items", HintIDs: []BindingID{KeyHelp, KeyDetail, KeyQuit},
+	}
+	output := shell.Render(view, 48, 12)
+	lines := strings.Split(output, "\n")
+	if len(lines) != 12 || !strings.Contains(strings.Join(lines[:7], "\n"), "<?> help") ||
+		!strings.Contains(strings.Join(lines[:7], "\n"), "<x> archive") {
+		t.Fatalf("top shortcut palette missing:\n%s", output)
+	}
+	if got := strings.TrimSpace(lines[len(lines)-2]); got != "› Items" {
+		t.Fatalf("breadcrumb row contains duplicate hints: %q\n%s", got, output)
+	}
+	if got := strings.TrimSpace(lines[len(lines)-1]); got != "" {
+		t.Fatalf("empty alert rail moved or contains hints: %q\n%s", got, output)
+	}
+}
+
+func TestModalHeaderShowsOnlyDispatchableShortcuts(t *testing.T) {
+	model := &Model{
+		shell: NewShell(""), mode: modeHelp,
+		ResourceTableComponent: ResourceTableComponent{leftOverflow: 2, rightOverflow: 3},
+	}
+	keys := model.applicableKeys()
+	want := []BindingID{KeyCancel, KeyHelp, KeyForceQuit}
+	if len(keys) != len(want) {
+		t.Fatalf("help-mode keys = %v, want %v", keys, want)
+	}
+	for index := range want {
+		if keys[index] != want[index] {
+			t.Fatalf("help-mode keys = %v, want %v", keys, want)
+		}
+	}
+}
+
+func TestGeneratedHeaderActionsExcludeReadOperations(t *testing.T) {
+	view := View{OperationIDs: []string{"listItems", "archiveItem"}}
+	model := &Model{descriptor: Descriptor{Operations: []Operation{
+		{ID: "listItems", Capabilities: []string{"list"}, Presentation: ActionPresentation{Label: "reload", Hotkey: "r"}},
+		{ID: "archiveItem", Capabilities: []string{"action"}, Presentation: ActionPresentation{Label: "archive", Hotkey: "x"}},
+	}}}
+	actions := model.localActions(view)
+	if len(actions) != 1 || actions[0].Hotkey != "x" || actions[0].Label != "archive" {
+		t.Fatalf("dispatchable generated actions = %#v", actions)
 	}
 }
 

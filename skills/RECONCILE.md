@@ -1,7 +1,7 @@
 # Reconciliation Checkpoint
 
 **Last Updated:** 2026-08-04
-**Last Run By:** Codex (reconcile skill — completed reusable TUI presentation system)
+**Last Run By:** Codex (reconcile skill — added contextual TUI header shortcuts)
 
 ---
 
@@ -13,9 +13,9 @@
 | api | 2 | 20 | 20 | 0 | 0 | 100% |
 | data | 2 | 14 | 13 | 1 | 0 | 92.9% |
 | security | 3 | 17 | 17 | 0 | 0 | 100% |
-| codegen | 6 | 87 | 77 | 9 | 1 | 88.5% |
+| codegen | 6 | 88 | 78 | 9 | 1 | 88.6% |
 | standards | 4 | 30 | 30 | 0 | 0 | 100% |
-| **Total** | **21** | **192** | **181** | **10** | **1** | **94.3%** |
+| **Total** | **21** | **193** | **182** | **10** | **1** | **94.3%** |
 
 ## Spec Dependency Order
 
@@ -83,20 +83,21 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-056 | CG-006 | Descriptor-Driven Generic Runtime | closed | minor | OpenAPI resources project to stable descriptors consumed by one resource-agnostic Bubble Tea model with no entity-specific tables or clients. |
 | GAP-057 | CG-006 | Standalone Generated Module | closed | minor | Generation emits a separately buildable Go module with pinned dependencies, embedded descriptors, runtime sources, tests, and a dedicated command. |
 | GAP-078 | CG-006 | Full-Screen Application Shell | closed | major | `Shell.Render` exclusively owns the header, conditional command bar, framed semantic page, breadcrumb, contextual hints, modal overlay, and final-row alert rail; page transitions replace content without remounting chrome. |
-| GAP-079 | CG-006 | Service-Neutral Header and Semantic Theme | closed | minor | The sanitized descriptor title, origin, auth state, scope, refresh state, and applicable actions flow through `HeaderModel`; `Theme` centrally owns all semantic tokens and Lip Gloss styles with no service-specific presentation source. |
+| GAP-079 | CG-006 | Service-Neutral Header and Semantic Theme | closed | minor | The sanitized descriptor title, origin, auth state, scope, and refresh state flow through `HeaderModel`; applicable shortcuts flow through `KeyRegistry` and `ShortcutPalette`; `Theme` centrally owns all semantic tokens and Lip Gloss styles with no service-specific presentation source. |
+| GAP-093 | CG-006 | Contextual Header Shortcut Palette | closed | minor | `ShortcutPalette` renders registry-derived fixed and generated actions as aligned `<key> Action` columns in at most six top rows, deterministically elides lower priorities by measured display width and available height, keeps Help discoverable, suppresses inapplicable modal actions, and has no duplicate bottom strip. |
 | GAP-080 | CG-006 | Centralized Responsive Layout | closed | major | `CalculateShellLayout` continuously clamps and allocates every shell region without a minimum width or breakpoint, elides optional metadata and hints by measured fit, preserves the fixed alert row, and supplies child content dimensions. |
 | GAP-081 | CG-006 | Reusable Presentation Component Architecture | closed | major | Dedicated theme, layout, keys, alert, page, table, detail/stream, command, modal, form, and shell components own their policies; a static architecture test rejects presentation rules outside the designated owner. |
 | GAP-082 | CG-006 | Unified Page Contract | closed | major | One semantic `Page` contract supplies only title, scope, count, state, content, and local actions for resource-table, detail, stream, loading, empty, forbidden, stale, and fatal rendering while the persistent shell owns services and chrome. |
 | GAP-083 | CG-006 | Shared Resource Table Page | closed | minor | `ResourceTableComponent` and `ResourceTablePage` provide descriptor-driven title/count/scope/state, table setup, sort/filter, identity-based selection restoration, adaptive columns, navigation, and loading/empty/forbidden/stale presentation for every collection. |
 | GAP-092 | CG-006 | Content-Aware Column Sizing and Horizontal Overflow | closed | minor | A centralized runtime policy measures sanitized Unicode display cells across loaded rows, applies schema-aware bounds, expansion, and priority compression, preserves per-frame offsets, scrolls by column with arrow-key bindings, and renders tested directional off-screen counts and hints. |
 | GAP-084 | CG-006 | Shared Detail and Stream Pages | closed | minor | `DetailStreamComponent` backs reusable detail and stream pages with one viewport, deterministic content, explicit connection/autoscroll state, cancelable stream lifecycle, and bounded event count and bytes inside shared shell framing. |
-| GAP-085 | CG-006 | Command, Filter, and Help Chrome | closed | minor | `CommandBar` supplies shared input, history, and completion for switch/filter modes; the shell owns its bordered row and the shared help modal derives contextual content and action hints from `KeyRegistry`. |
-| GAP-086 | CG-006 | Single Keybinding and Hint Registry | closed | major | `KeyRegistry` is authoritative for dispatch, hints, help, reserved-key checks, focus/navigation keys, and applicable generated action hotkeys; projection rejects conflicts with both operation locations. |
+| GAP-085 | CG-006 | Command, Filter, and Help Chrome | closed | minor | `CommandBar` supplies shared input, history, and completion for switch/filter modes; the shell owns its bordered row and the shared help modal derives the same structured shortcuts as the header from `KeyRegistry`. |
+| GAP-086 | CG-006 | Single Keybinding and Hint Registry | closed | major | `KeyRegistry` is authoritative for dispatch, structured header shortcuts, help, reserved-key checks, focus/navigation keys, priorities, and applicable generated action hotkeys; projection rejects conflicts with both operation locations. |
 | GAP-087 | CG-006 | Consistent Alert and Error Rail | closed | major | `AlertManager` owns sanitized/redacted severity, deterministic priority, five-second transient expiry, persistent errors/warnings, related clearing, dismissal, and details; the shell always reserves the final row and tests assert its coordinate across modes and widths. |
 | GAP-088 | CG-006 | Shared Dialog Host and Dialog Primitives | closed | major | `ModalHost` overlays one centered help, choice, confirmation, or form dialog only within the page frame; shared confirmation/form behavior owns cancellation, focus, validation, safe destructive focus, and duplicate-submit prevention. |
 | GAP-089 | CG-006 | Schema-Driven Form Dialog | closed | major | `FormDialog` deterministically projects parameters and writable body fields, omits read-only fields, supports enums/defaults/zero values and raw JSON fallback, validates types/formats inline and in the alert rail, and blocks invalid or in-flight resubmission. |
 | GAP-090 | CG-006 | Refresh and Stale-Data Lifecycle | closed | major | The generated `--refresh-interval` defaults to five seconds and accepts zero; active readable frames poll without overlap, streams/hidden frames are excluded, late results are ignored, post-action refresh is immediate, and stale/error/selection/last-success state is preserved and recovered. |
-| GAP-091 | CG-006 | Presentation Component Conformance Gate | closed | major | Deterministic PlainTheme snapshots and behavioral tests cover continuous layouts, all semantic page states, command/modal/error coordinates, alerts, forms, confirmations, refresh, selection, sort/history, Unicode columns, and overflow; the architecture gate proves rejection with a synthetic violating page. |
+| GAP-091 | CG-006 | Presentation Component Conformance Gate | closed | major | Deterministic PlainTheme snapshots and behavioral tests cover continuous layouts, top shortcut ordering/packing/elision/help parity, absence of bottom duplication, all semantic page states, command/modal/error coordinates, alerts, forms, confirmations, refresh, selection, sort/history, Unicode columns, and overflow; the architecture gate rejects synthetic page-owned style and shortcut layout. |
 | GAP-058 | CG-006 | Resource View Graph Projection | closed | minor | Descriptors retain global/scoped views, explicit and inferred edge provenance, explicit precedence, and diagnostics for ambiguous disconnected views. |
 | GAP-059 | CG-006 | Multi-Parent Views and Navigation Stack | closed | minor | Runtime frames preserve the actual incoming edge, selected identity, bindings, and parent-specific selection across push/pop navigation. |
 | GAP-060 | CG-006 | Deterministic Path-Parameter Binding | closed | major | Link mappings support the complete OpenAPI runtime-expression grammar; inherited and selected-row bindings are deterministic, location-aware, and reject missing or ambiguous values before HTTP. |
@@ -136,7 +137,7 @@ Recommended implementation order for the remaining gaps:
 3. **Console view fidelity:** GAP-017, GAP-019, and GAP-045 — project scoped views/actions and component-test supported and absent capabilities.
 4. **Independent data gap:** GAP-005 — connect the existing advisory-lock abstraction to migration execution.
 
-API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. The remaining codegen gaps belong to CLI, SDK, and console fidelity, plus the independent migration-lock gap. GAP-001–004, GAP-006–009, GAP-020–042, GAP-052–092 remain closed and require no further action.
+API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. The remaining codegen gaps belong to CLI, SDK, and console fidelity, plus the independent migration-lock gap. GAP-001–004, GAP-006–009, GAP-020–042, GAP-052–093 remain closed and require no further action.
 
 ## Reconciliation History
 
@@ -160,3 +161,4 @@ API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. The remainin
 | 2026-08-04 | 85.4% (164/192) | Added content-aware Unicode display-cell sizing, centralized width bounds and compression, horizontal column scrolling, directional overflow counts, and arrow-key hints; identified the equal-width, inaccessible-column behavior as partial and reopened priority semantics. | Codex |
 | 2026-08-04 | 86.5% (166/192) | Closed GAP-061 and GAP-092 with schema-aware Unicode column measurement, bounded priority compression, per-frame horizontal offsets, arrow-key scrolling, off-screen counts and hints, regenerated standalone output, and focused generator/runtime tests. | Codex |
 | 2026-08-04 | 94.3% (181/192) | Closed GAP-063 and GAP-078–091 with a reusable semantic shell and page system, continuous layout, centralized theme/keys/alerts/modals, shared table/detail/stream/command/form components, safe confirmations, refresh/stale lifecycle, deterministic snapshots, and architecture duplication gates. | Codex |
+| 2026-08-04 | 94.3% (182/193) | Added and closed GAP-093 with a k9s-style contextual top shortcut palette, single-registry header/help parity, six-row measured packing, responsive priority elision, mode-correct visibility, and no duplicate bottom strip. | Codex |

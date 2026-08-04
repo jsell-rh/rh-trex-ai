@@ -288,15 +288,11 @@ func (model *Model) View() string {
 }
 
 func (model *Model) shellView(view View, page Page, command string) ShellView {
-	headerActions := model.localActions(view)
-	if command != "" || model.shell.Modal.Active() {
-		headerActions = nil
-	}
 	return ShellView{
 		Header: HeaderModel{
 			Service: model.descriptor.Title, Page: view.Label, Origin: model.serverOrigin(),
 			Authenticated: model.authenticated(), Scope: model.scope(), Refreshing: model.currentRefreshing(),
-			LastSuccess: model.currentLastSuccess(), Now: model.currentTime(), Actions: headerActions,
+			LastSuccess: model.currentLastSuccess(), Now: model.currentTime(),
 		},
 		Page: page, Command: command, Breadcrumb: model.breadcrumb(), HintIDs: model.applicableKeys(),
 	}
@@ -314,26 +310,34 @@ func (model *Model) semanticPage(view View) Page {
 	} else if model.loading && len(model.rows) == 0 && frame.Selected == nil {
 		state = PageLoading
 	}
+	var actions []LocalAction
+	if model.mode == modeBrowse {
+		actions = model.localActions(view)
+	}
 	if model.mode == modeDetail {
-		return DetailPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.detail.View(), PageActions: model.localActions(view)}}
+		return DetailPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.detail.View(), PageActions: actions}}
 	}
 	if view.Kind == "stream" {
-		return StreamPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.StreamContent(), PageActions: model.localActions(view)}}
+		return StreamPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.StreamContent(), PageActions: actions}}
 	}
 	count := len(model.visible)
 	if state == PageReady && !model.loading && count == 0 {
 		state = PageEmpty
 	}
-	return ResourceTablePage{SemanticPage{PageTitle: view.Label, PageScope: model.tableScope(), PageCount: &count, PageState: state, PageContent: model.tableView(), PageActions: model.localActions(view)}}
+	return ResourceTablePage{SemanticPage{PageTitle: view.Label, PageScope: model.tableScope(), PageCount: &count, PageState: state, PageContent: model.tableView(), PageActions: actions}}
 }
 
 func (model *Model) applicableKeys() []BindingID {
-	activeMode := model.mode
-	if activeMode == modeHelp || activeMode == modeAlertDetails {
-		activeMode = model.previousMode
-	}
+	return model.applicableKeysForMode(model.mode)
+}
+
+func (model *Model) applicableKeysForMode(activeMode mode) []BindingID {
 	var keys []BindingID
 	switch activeMode {
+	case modeHelp:
+		keys = []BindingID{KeyCancel, KeyHelp, KeyForceQuit}
+	case modeAlertDetails:
+		keys = []BindingID{KeyCancel, KeyHelp, KeyDismissAlert, KeyForceQuit}
 	case modeFilter, modeSwitch:
 		keys = []BindingID{KeySubmit, KeyCancel, KeyHistoryPrevious, KeyHistoryNext, KeyHelp, KeyForceQuit}
 		if activeMode == modeSwitch {
@@ -350,37 +354,41 @@ func (model *Model) applicableKeys() []BindingID {
 	default:
 		keys = []BindingID{KeyCommand, KeyFilter, KeyNavigate, KeyDetail, KeyActions, KeySortNext, KeySortDirection, KeyCancel, KeyHelp, KeyQuit}
 	}
-	if _, present := model.shell.Alerts.Active(); present {
-		keys = append(keys, KeyAlertDetails, KeyDismissAlert)
+	if activeMode != modeHelp && activeMode != modeAlertDetails {
+		if _, present := model.shell.Alerts.Active(); present {
+			keys = append(keys, KeyAlertDetails, KeyDismissAlert)
+		}
 	}
-	if model.leftOverflow > 0 {
+	if activeMode == modeBrowse && model.leftOverflow > 0 {
 		keys = append(keys, KeyColumnsLeft)
 	}
-	if model.rightOverflow > 0 {
+	if activeMode == modeBrowse && model.rightOverflow > 0 {
 		keys = append(keys, KeyColumnsRight)
 	}
-	if view := model.currentView(); view != nil && view.Kind == "stream" {
+	if view := model.currentView(); activeMode == modeDetail && view != nil && view.Kind == "stream" {
 		keys = append(keys, KeyToggleAutoscroll)
 	}
 	return keys
 }
 
 func (model *Model) helpContent(view View) string {
-	content := model.shell.Keys.Help(model.applicableKeys()...)
-	if actionHints := model.shell.Keys.ActionHints(model.localActions(view)); actionHints != "" {
-		if content != "" {
-			content += "\n"
-		}
-		content += actionHints
+	helpMode := model.mode
+	if helpMode == modeHelp {
+		helpMode = model.previousMode
 	}
-	return content
+	var actions []LocalAction
+	if helpMode == modeBrowse {
+		actions = model.localActions(view)
+	}
+	return model.shell.Keys.ShortcutHelp(model.applicableKeysForMode(helpMode), actions)
 }
 
 func (model *Model) localActions(view View) []LocalAction {
 	var result []LocalAction
 	for _, id := range view.OperationIDs {
 		operation := model.descriptor.Operation(id)
-		if operation == nil || operation.Presentation.Hotkey == "" {
+		if operation == nil || operation.Presentation.Hotkey == "" ||
+			containsString(operation.Capabilities, "list") || containsString(operation.Capabilities, "get") {
 			continue
 		}
 		result = append(result, LocalAction{Label: actionLabel(*operation), Hotkey: operation.Presentation.Hotkey})
@@ -1189,7 +1197,7 @@ func (model *Model) pageContentSize() (int, int) {
 	model.ensurePresentation()
 	view := model.currentView()
 	if view == nil {
-		layout := CalculateShellLayout(model.width, model.height, false, "", "")
+		layout := CalculateShellLayout(model.width, model.height, false, "", nil)
 		return layout.ContentWidth, layout.ContentHeight
 	}
 	command := ""

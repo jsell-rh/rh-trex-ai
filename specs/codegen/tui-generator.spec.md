@@ -128,6 +128,29 @@ The runtime SHALL define semantic theme tokens for primary, secondary, normal, m
 - THEN the header SHALL identify Inventory API, the active origin, authenticated state, and current scope
 - AND no TRex name, dinosaur label, or hard-coded service color SHALL appear
 
+### Requirement: Contextual Header Shortcut Palette
+
+The shared header SHALL render currently applicable keyboard shortcuts as a k9s-style, multi-row palette whose entries use the form `<key> Action`. The palette SHALL derive fixed bindings and generated operation hotkeys exclusively from the single keybinding registry used for dispatch and help. It SHALL preserve stable registry order, align entries in display-cell-measured columns, and use no more than six shortcut rows below the header identity row. Hidden, unavailable, or inapplicable capabilities SHALL NOT appear.
+
+The shared layout SHALL render only complete shortcut entries. When terminal width or height is constrained, it SHALL elide lower-priority entries deterministically before higher-priority entries, retain the help shortcut whenever any shortcut row can be rendered, and restore elided entries when space returns. The complete applicable binding set SHALL remain available through the help dialog. The palette SHALL NOT be duplicated in the breadcrumb, alert rail, or a separate bottom shortcut strip, and its layout SHALL NOT use fixed width breakpoints or a minimum terminal width.
+
+#### Scenario: Show only current page capabilities
+
+- GIVEN a table supports navigation, detail, sorting, horizontal scrolling, and one generated operation hotkey but does not support delete
+- WHEN the table receives focus
+- THEN the top header palette SHALL show the applicable fixed and generated shortcuts as `<key> Action` entries
+- AND those entries and the help dialog SHALL use the same bindings that dispatch the actions
+- AND no delete shortcut or separate bottom shortcut strip SHALL be rendered
+
+#### Scenario: Continuously elide and restore shortcuts
+
+- GIVEN more applicable shortcuts than fit in a constrained terminal
+- WHEN the terminal is narrowed, shortened, and later restored
+- THEN only complete lower-priority entries SHALL disappear in deterministic order
+- AND the help shortcut SHALL remain visible whenever at least one shortcut row is available
+- AND the page identity, breadcrumb, and fixed alert rail SHALL retain their locations
+- AND widening or lengthening the terminal SHALL restore the applicable entries in stable registry order
+
 ### Requirement: Centralized Responsive Layout
 
 One shared layout component SHALL calculate all shell and content dimensions continuously from Bubble Tea window-size messages. It SHALL NOT impose a minimum terminal width, use fixed width breakpoints, or replace the active page with a terminal-too-small screen. As horizontal space contracts, it SHALL first omit optional header metadata and low-priority hints according to measured fit, then compress table columns to their shared minimums and expose horizontal overflow rather than remove declared columns solely because of terminal width. All dimensions SHALL be clamped to non-negative values, and child components SHALL NOT perform independent terminal-size arithmetic. Constrained layout SHALL preserve active page identity, navigation, overflow affordances, and the alert rail whenever the terminal has rows available for them.
@@ -231,9 +254,10 @@ One keybinding registry SHALL be authoritative for global and local dispatch, co
 #### Scenario: Keep dispatch, hints, and help aligned
 
 - GIVEN a page supports create and stream actions but not delete
-- WHEN its controls, header hints, footer hints, and help dialog are rendered
-- THEN all four SHALL derive their applicable bindings from the same registry
+- WHEN its controls, header shortcut palette, and help dialog are rendered
+- THEN all three SHALL derive their applicable bindings from the same registry
 - AND no delete binding or stale help entry SHALL be displayed or dispatched
+- AND no stale or duplicate shortcut entry SHALL appear below the page
 
 ### Requirement: Consistent Alert and Error Rail
 
@@ -305,7 +329,7 @@ The header SHALL show refresh activity and the last successful refresh age. A pa
 
 ### Requirement: Presentation Component Conformance Gate
 
-The generated runtime SHALL have deterministic component tests for spacious, constrained, and extremely narrow continuous layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
+The generated runtime SHALL have deterministic component tests for spacious, constrained, and extremely narrow continuous layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover contextual header shortcut ordering, display-cell column alignment, the six-row bound, responsive elision and restoration, help and dispatch parity, and absence of a duplicate bottom shortcut strip. Tests SHALL also cover content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, shortcut-palette layout, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
 
 #### Scenario: Prove one presentation system
 
@@ -683,6 +707,7 @@ Continuous integration SHALL run the TUI generator against the fully resolved re
 | Semantic components own presentation policy | One implementation of each page, dialog, alert, state, and chrome primitive prevents resource or operation views from drifting apart |
 | Fixed bottom alert rail | Errors remain spatially predictable across pages, modes, dialogs, and responsive layouts while inline field and fatal context remain available |
 | One keybinding registry | Dispatch, contextual hints, generated hotkeys, conflict validation, and help cannot silently disagree |
+| Contextual shortcuts in the top header | A k9s-style multi-row palette keeps current actions discoverable without competing with the bottom breadcrumb and fixed alert rail; measured packing retains continuous behavior on narrow terminals |
 | Central theme and responsive layout | Semantic tokens and one measurement authority eliminate ad hoc styling and conflicting terminal arithmetic |
 | Content-sized columns with signaled horizontal overflow | Natural display-cell widths preserve information density, bounded compression handles constrained terminals, and directional indicators make every off-screen column discoverable through arrow-key scrolling |
 | Modal schema-driven forms | Descriptor inputs can share validation, focus, cancellation, and in-flight behavior without operation-specific form code |

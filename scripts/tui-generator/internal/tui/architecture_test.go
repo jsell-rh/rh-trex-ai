@@ -38,6 +38,15 @@ func badPage() string { return lipgloss.NewStyle().Foreground(lipgloss.Color("1"
 	}
 }
 
+func TestArchitectureGateRejectsSyntheticPageOwnedShortcutLayout(t *testing.T) {
+	failures := presentationPolicyViolations(map[string]string{"bad_page.go": `package tui
+func badPage(shortcuts []ShortcutHint) { LayoutShortcutPalette(shortcuts, 80, 6) }
+`})
+	if len(failures) == 0 {
+		t.Fatal("architecture gate accepted page-owned shortcut-palette layout")
+	}
+}
+
 func presentationPolicyViolations(sources map[string]string) []string {
 	var failures []string
 	for name, source := range sources {
@@ -52,6 +61,9 @@ func presentationPolicyViolations(sources map[string]string) []string {
 		}
 		if name != "column_layout.go" && strings.Contains(source, "tableColumnMinimumWidth") {
 			failures = append(failures, name+": column sizing policy outside column_layout.go")
+		}
+		if name != "shortcut_palette.go" && name != "layout.go" && strings.Contains(source, "LayoutShortcutPalette(") {
+			failures = append(failures, name+": shortcut-palette layout outside shortcut_palette.go")
 		}
 		if name != "alert.go" && (strings.Contains(source, "alertLifetime") || strings.Contains(source, "alertPriority(")) {
 			failures = append(failures, name+": alert lifetime/priority outside alert.go")
