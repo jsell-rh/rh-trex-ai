@@ -118,7 +118,7 @@ func TestDeleteActionAlwaysProjectsDestructiveConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive := operationByID(t, descriptor, "archiveChild")
-	if archive.Presentation.Confirmation == nil || !archive.Presentation.Confirmation.Destructive || archive.Presentation.Confirmation.Title == "" || archive.Presentation.Confirmation.Message == "" {
+	if archive.Presentation.Confirmation == nil || !archive.Presentation.Confirmation.Destructive || archive.Presentation.Confirmation.Title != "Delete" || archive.Presentation.Confirmation.Message == "" || strings.Contains(archive.Presentation.Confirmation.Message, "Run ") {
 		t.Fatalf("delete confirmation = %#v", archive.Presentation.Confirmation)
 	}
 }

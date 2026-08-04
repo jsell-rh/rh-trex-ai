@@ -194,7 +194,7 @@ Every resource-catalog, list, detail, stream, loading, empty, forbidden, and fat
 
 ### Requirement: Shared Resource Table Page
 
-The top-level resource catalog and all collection views SHALL use one reusable resource-table page backed by the Bubbles table component. It SHALL render a descriptor-derived `kind(context)[count]` title centered in the page frame's top border, with unscoped context rendered as `all`. Kind, context, and count SHALL use distinct semantic theme styles, and any non-ready page state SHALL use a fourth state-appropriate semantic style. While a non-empty table filter is active, the same centered title SHALL append one visually distinct `</filter>` badge containing the sanitized active expression; the badge SHALL update with live filter input, remain after the prompt closes, and disappear immediately when the filter is cleared. The count SHALL describe the filtered visible rows. The component SHALL also render full-row selection, active sort and filter state, deterministic adaptive columns, and shared loading, empty, forbidden, and stale-data states. An active ascending or descending sort marker SHALL be a protected left prefix of its header label, such as `↑ NAME`, so right-side ellipsis truncation cannot hide the sort state. Sorting, filtering, selection restoration by validated identity, and row navigation SHALL be implemented once for every resource descriptor and the catalog.
+The top-level resource catalog and all collection views SHALL use one reusable resource-table page backed by the Bubbles table component. Descriptor collection views SHALL render a descriptor-derived `kind(context)[count]` title centered in the page frame's top border, with unscoped context rendered as `all`. The synthetic home catalog SHALL instead render the simple centered title `Resources` without a synthetic context or count. Kind, context, and count SHALL use distinct semantic theme styles, and any non-ready page state SHALL use a fourth state-appropriate semantic style. While a non-empty table filter is active, the same centered title SHALL append one visually distinct `</filter>` badge containing the sanitized active expression; the badge SHALL update with live filter input, remain after the prompt closes, and disappear immediately when the filter is cleared. A descriptor collection count SHALL describe the filtered visible rows. The component SHALL also render full-row selection, active sort and filter state, deterministic adaptive columns, and shared loading, empty, forbidden, and stale-data states. An active ascending or descending sort marker SHALL be a protected left prefix of its header label, such as `↑ NAME`, so right-side ellipsis truncation cannot hide the sort state. Sorting, filtering, selection restoration by validated identity, and row navigation SHALL be implemented once for every resource descriptor and the catalog.
 
 #### Scenario: Render unrelated collection schemas
 
@@ -333,7 +333,9 @@ Successful initial list and detail reads, navigation reads, and background refre
 
 ### Requirement: Shared Dialog Host and Dialog Primitives
 
-One modal host SHALL display at most one centered help, choice, confirmation, or form dialog over the page frame without covering or relocating the breadcrumb footer or alert rail. All dialogs SHALL use one frame, focus trap, button, cancellation, validation-summary, sizing, in-flight, and action-footer policy. In a form footer, navigation and choice actions SHALL precede cancellation and submission, the `Esc` cancellation action SHALL appear immediately left of the `Enter` submission action, and `Enter` SHALL be the rightmost action with the primary semantic style. `Esc` SHALL cancel when cancellation is safe, focus navigation SHALL be consistent, destructive confirmation SHALL initially focus the safe cancel action, and an in-flight operation SHALL not be submitted twice.
+One modal host SHALL display at most one centered help, choice, confirmation, or form dialog over the page frame without covering or relocating the breadcrumb footer or alert rail. All dialogs SHALL use one frame, focus trap, button, cancellation, validation-summary, sizing, in-flight, and action-footer policy. In a form footer, navigation and choice actions SHALL precede cancellation and submission, the `Esc` cancellation action SHALL appear immediately left of the `Enter` submission action, and `Enter` SHALL be the rightmost action with the primary semantic style. `Esc` SHALL cancel when cancellation is safe, focus navigation SHALL be consistent, and an in-flight operation SHALL not be submitted twice.
+
+Every operation confirmation SHALL use one shared compact confirmation component. It SHALL render a centered inset title, a centered sanitized question, and one centered button row with `Cancel` on the left and the affirmative action on the right. The affirmative button SHALL read `Delete` for destructive confirmations and `Confirm` for other confirmations. The focused button SHALL use the selected semantic style; destructive confirmation SHALL initially focus the safe cancel action. `Tab`, `Shift+Tab`, `Left`, and `Right` SHALL move focus between complete buttons, `Enter` SHALL activate only the focused button, and `Esc` SHALL cancel. The compact component SHALL be content-sized with a stable minimum width and bounded terminal margins; it SHALL NOT expand to page width because of a redundant key-hint footer, render a separate `DESTRUCTIVE` banner, or expose generic implementation wording such as `Run <operation>`.
 
 #### Scenario: Confirm a destructive operation safely
 
@@ -341,6 +343,9 @@ One modal host SHALL display at most one centered help, choice, confirmation, or
 - WHEN its confirmation dialog opens
 - THEN the underlying page and selection SHALL remain visible and unchanged
 - AND cancel SHALL initially hold focus
+- AND the dialog SHALL show one compact centered question above `Cancel` and `Delete` buttons
+- AND the focused Cancel button SHALL use the selected semantic style
+- AND no destructive banner or key-hint footer SHALL be rendered inside the dialog
 - AND the fixed alert rail SHALL remain visible below the overlay
 - AND repeated submit keys SHALL cause at most one HTTP request
 
@@ -561,20 +566,22 @@ Every DELETE operation SHALL require the shared destructive confirmation dialog 
 
 ### Requirement: Resource Switching, Tables, Filtering, and Detail
 
-The runtime SHALL open on a top-level resource catalog containing every descriptor collection view, including scoped views that are not currently addressable. Each catalog row SHALL identify the resource, its required scope or global status, and whether it is currently ready or requires context. `Enter` on an addressable catalog row SHALL push that resource onto the navigation stack and perform its documented read; `Enter` on a row with unsatisfied scope bindings SHALL perform no request and SHALL explain the required context through the fixed alert rail. `Esc` from a top-level resource SHALL return to the catalog without issuing a catalog request.
+The runtime SHALL open on a top-level resource catalog containing exactly the descriptor collection views whose `ScopeParameters` are empty. The catalog SHALL present one visible resource-name column in deterministic label order, and that column SHALL fill the available table width so the header and full-row selection styling reach the table's right edge. It SHALL NOT place scope, readiness, route, operation, or other API-debugging metadata in the primary list. Such metadata MAY be exposed through a secondary help or detail presentation. Scoped collection views SHALL remain absent from the home catalog and SHALL remain discoverable through descriptor relationship navigation from their parents. `Enter` on a catalog row SHALL push that resource onto the navigation stack and perform its documented read; `Esc` from a top-level resource SHALL return to the catalog without issuing a catalog request. A descriptor with no unscoped collection view SHALL still render an empty Resources page without issuing a request.
 
 The runtime SHALL also provide a resource switcher for globally addressable views and for scoped views whose required bindings are available in the current stack. It SHALL accept each validated alias and expose the same available labels, view identifiers, and aliases to the shared deterministic inline completion model. A successful switch SHALL retain the catalog as the navigation root. The runtime SHALL render list responses as selectable tables, apply `/` filtering across sanitized visible column values, and provide a scrollable item-detail view containing all readable response fields. `Enter` SHALL follow an available descriptor relationship from the selected row; when more than one edge is available it SHALL present a deterministic relationship chooser rather than choose a parent or child implicitly. A detail command SHALL remain available independently of child navigation.
 
-#### Scenario: Browse the complete resource catalog
+#### Scenario: Browse the top-level resource catalog
 
 - GIVEN descriptors define a global Dinosaurs collection and a scoped Fossils collection requiring `dinosaur_id`
 - WHEN the TUI starts
-- THEN the initial catalog SHALL contain both resources without making an API request
-- AND Dinosaurs SHALL be ready while Fossils SHALL state that context is required
+- THEN the initial catalog SHALL use the simple title `Resources` and contain Dinosaurs in one resource-name column without making an API request
+- AND the resource-name column and its selected-row styling SHALL fill the available table width
+- AND Fossils SHALL be absent from the initial catalog
+- AND no scope or readiness column SHALL appear
 - WHEN the user selects Dinosaurs
 - THEN the runtime SHALL push Dinosaurs, execute its documented list operation, and retain Resources as the breadcrumb root
-- WHEN the user returns and selects Fossils without the required binding
-- THEN the runtime SHALL make no request and SHALL identify `dinosaur_id` as required context
+- WHEN the user selects a dinosaur with a documented relationship to Fossils
+- THEN the runtime SHALL expose Fossils through parent navigation using the bound `dinosaur_id`
 
 #### Scenario: Browse without resource-specific code
 
@@ -738,7 +745,7 @@ Fixture tests SHALL prove that controls and request inputs are projected only fr
 
 ### Requirement: Runtime Navigation Gate
 
-Generated-runtime acceptance tests SHALL use `httptest` with `teatest` to send user keystrokes and assert initial catalog rendering without an API request, global and unavailable scoped catalog rows, catalog entry and return, protected left-prefix sort markers under truncation, resource switching, aliases, filtering, selected-item action discovery and binding, selected-row navigation, relationship choice, details, `Enter` push, `Esc` pop, breadcrumbs, multi-parent history, and inline API errors. The test SHALL exercise generated descriptors rather than a resource-specific fake runtime.
+Generated-runtime acceptance tests SHALL use `httptest` with `teatest` to send user keystrokes and assert initial one-column unscoped catalog rendering without an API request, scoped-view exclusion from the catalog, scoped discovery through parent navigation, catalog entry and return, compact safe destructive confirmation, protected left-prefix sort markers under truncation, resource switching, aliases, filtering, selected-item action discovery and binding, selected-row navigation, relationship choice, details, `Enter` push, `Esc` pop, breadcrumbs, multi-parent history, and inline API errors. The test SHALL exercise generated descriptors rather than a resource-specific fake runtime.
 
 #### Scenario: Enter and Escape preserve scope
 

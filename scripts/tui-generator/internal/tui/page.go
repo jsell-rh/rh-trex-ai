@@ -29,27 +29,30 @@ type Page interface {
 	Scope() string
 	Count() *int
 	Filter() string
+	SimpleTitle() bool
 	State() PageState
 	Content() string
 	Actions() []LocalAction
 }
 
 type SemanticPage struct {
-	PageTitle   string
-	PageScope   string
-	PageCount   *int
-	PageFilter  string
-	PageState   PageState
-	PageContent string
-	PageActions []LocalAction
+	PageTitle       string
+	PageScope       string
+	PageCount       *int
+	PageFilter      string
+	PageSimpleTitle bool
+	PageState       PageState
+	PageContent     string
+	PageActions     []LocalAction
 }
 
-func (page SemanticPage) Title() string    { return page.PageTitle }
-func (page SemanticPage) Scope() string    { return page.PageScope }
-func (page SemanticPage) Count() *int      { return page.PageCount }
-func (page SemanticPage) Filter() string   { return page.PageFilter }
-func (page SemanticPage) State() PageState { return page.PageState }
-func (page SemanticPage) Content() string  { return page.PageContent }
+func (page SemanticPage) Title() string     { return page.PageTitle }
+func (page SemanticPage) Scope() string     { return page.PageScope }
+func (page SemanticPage) Count() *int       { return page.PageCount }
+func (page SemanticPage) Filter() string    { return page.PageFilter }
+func (page SemanticPage) SimpleTitle() bool { return page.PageSimpleTitle }
+func (page SemanticPage) State() PageState  { return page.PageState }
+func (page SemanticPage) Content() string   { return page.PageContent }
 func (page SemanticPage) Actions() []LocalAction {
 	return append([]LocalAction(nil), page.PageActions...)
 }
@@ -90,11 +93,12 @@ type PageFrameTitle struct {
 	Context string
 	Count   *int
 	Filter  string
+	Simple  bool
 }
 
 func pageFrameTitle(page Page) PageFrameTitle {
 	context := SanitizeCell(page.Scope())
-	if context == "" {
+	if context == "" && !page.SimpleTitle() {
 		context = "all"
 	}
 	return PageFrameTitle{
@@ -102,5 +106,6 @@ func pageFrameTitle(page Page) PageFrameTitle {
 		Context: context,
 		Count:   page.Count(),
 		Filter:  SanitizeCell(page.Filter()),
+		Simple:  page.SimpleTitle(),
 	}
 }

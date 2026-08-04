@@ -59,6 +59,12 @@ func calculateColumnLayout(view View, rows []Row, available, requestedOffset int
 		weights[index] = policy.expansionWeight
 		widths[index] = clampInt(natural, policy.minimum, policy.maximum)
 	}
+	if view.FillWidth && count == 1 {
+		fillWidth := max(1, available-tableColumnGutterWidth)
+		minimums[0] = min(minimums[0], fillWidth)
+		maximums[0] = fillWidth
+		widths[0] = fillWidth
+	}
 
 	used := columnsDisplayWidth(widths, 0, len(widths))
 	if used < available {

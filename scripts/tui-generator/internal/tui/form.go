@@ -443,23 +443,33 @@ func NewConfirmationDialog(label string, confirmation Confirmation, keys KeyRegi
 }
 
 func (dialog *ConfirmationDialog) Kind() DialogKind { return DialogConfirmation }
-func (dialog *ConfirmationDialog) Title() string    { return dialog.confirmation.Title }
-func (dialog *ConfirmationDialog) Footer(Theme) string {
-	return dialog.keys.Hints(KeyNextFocus, KeySubmit, KeyCancel)
-}
-func (dialog *ConfirmationDialog) Content(Theme) string {
-	message := SanitizeCell(dialog.confirmation.Message)
-	if dialog.confirmation.Destructive {
-		message = "DESTRUCTIVE · " + message
+func (dialog *ConfirmationDialog) Title() string {
+	if title := strings.TrimSpace(dialog.confirmation.Title); title != "" {
+		return title
 	}
-	cancel, confirm := "[ Cancel ]", "  Confirm  "
-	if dialog.confirmFocus {
-		cancel, confirm = "  Cancel  ", "[ Confirm ]"
+	if dialog.confirmation.Destructive {
+		return "Delete"
+	}
+	return "Confirm"
+}
+func (dialog *ConfirmationDialog) Footer(Theme) string { return "" }
+func (dialog *ConfirmationDialog) Content(theme Theme) string {
+	message := strings.TrimSpace(SanitizeCell(dialog.confirmation.Message))
+	if message == "" {
+		message = strings.TrimSpace(SanitizeCell(dialog.label)) + "?"
+	}
+	affirmative := "Confirm"
+	if dialog.confirmation.Destructive {
+		affirmative = "Delete"
 	}
 	if dialog.inFlight {
-		confirm = "[ Working… ]"
+		affirmative = "Working…"
 	}
-	return message + "\n\n" + cancel + "  " + confirm
+	cancel := theme.DialogButton("Cancel", !dialog.confirmFocus)
+	confirm := theme.DialogButton(affirmative, dialog.confirmFocus)
+	buttons := cancel + "     " + confirm
+	contentWidth := max(36, ansi.StringWidth(message), ansi.StringWidth(buttons))
+	return "\n" + centerDialogLine(message, contentWidth) + "\n\n" + centerDialogLine(buttons, contentWidth) + "\n"
 }
 
 func (dialog *ConfirmationDialog) Update(message tea.KeyMsg) (confirmed, canceled bool) {
@@ -469,8 +479,12 @@ func (dialog *ConfirmationDialog) Update(message tea.KeyMsg) (confirmed, cancele
 	if dialog.keys.Matches(message, KeyCancel) {
 		return false, true
 	}
-	if dialog.keys.Matches(message, KeyNextFocus) || dialog.keys.Matches(message, KeyPreviousFocus) {
-		dialog.confirmFocus = !dialog.confirmFocus
+	if dialog.keys.Matches(message, KeyPreviousFocus) || dialog.keys.Matches(message, KeyChoicePrevious) {
+		dialog.confirmFocus = false
+		return false, false
+	}
+	if dialog.keys.Matches(message, KeyNextFocus) || dialog.keys.Matches(message, KeyChoiceNext) {
+		dialog.confirmFocus = true
 		return false, false
 	}
 	if dialog.keys.Matches(message, KeySubmit) {
@@ -481,4 +495,11 @@ func (dialog *ConfirmationDialog) Update(message tea.KeyMsg) (confirmed, cancele
 		return true, false
 	}
 	return false, false
+}
+
+func centerDialogLine(value string, width int) string {
+	valueWidth := ansi.StringWidth(value)
+	left := max(0, (width-valueWidth)/2)
+	right := max(0, width-valueWidth-left)
+	return strings.Repeat(" ", left) + value + strings.Repeat(" ", right)
 }

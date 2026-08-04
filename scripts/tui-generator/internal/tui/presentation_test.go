@@ -268,6 +268,14 @@ func TestPlainPageFrameSnapshot(t *testing.T) {
 	}
 }
 
+func TestSimpleCatalogFrameTitleOmitsSyntheticContextAndCount(t *testing.T) {
+	count := 3
+	label := PlainTheme().FrameLabel(PageFrameTitle{Kind: "Resources", Context: "all", Count: &count, Simple: true}, PageReady)
+	if label != "Resources" {
+		t.Fatalf("simple catalog frame label = %q", label)
+	}
+}
+
 func TestFrameTitleIsCenteredAndUsesSemanticSegments(t *testing.T) {
 	count := 8
 	title := PageFrameTitle{Kind: "Dinosaur", Context: "all", Count: &count}
@@ -483,14 +491,31 @@ func TestRequiredStructuredBodySubmitsEmptyObject(t *testing.T) {
 func TestDestructiveConfirmationStartsOnCancelAndSubmitsOnce(t *testing.T) {
 	keys := DefaultKeyRegistry()
 	dialog := NewConfirmationDialog("Delete", Confirmation{Title: "Confirm delete", Message: "Delete it?", Destructive: true}, keys)
-	if !strings.Contains(dialog.Content(PlainTheme()), "[ Cancel ]") {
-		t.Fatalf("safe focus absent: %q", dialog.Content(PlainTheme()))
+	content := dialog.Content(PlainTheme())
+	if !strings.Contains(content, "[ Cancel ]") || !strings.Contains(content, "Delete") || strings.Contains(content, "DESTRUCTIVE") || dialog.Footer(PlainTheme()) != "" {
+		t.Fatalf("compact safe confirmation = content %q, footer %q", content, dialog.Footer(PlainTheme()))
+	}
+	host := ModalHost{}
+	host.Open(dialog)
+	rendered := host.Render("background", 80, 20, PlainTheme())
+	if !strings.Contains(rendered, "<Confirm delete>") || strings.Contains(rendered, "select/submit") || strings.Contains(rendered, "back/cancel") {
+		t.Fatalf("confirmation overlay has redundant or missing chrome:\n%s", rendered)
 	}
 	confirmed, canceled := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if confirmed || !canceled {
 		t.Fatalf("enter on safe focus = confirmed %v, canceled %v", confirmed, canceled)
 	}
 	dialog = NewConfirmationDialog("Delete", Confirmation{Title: "Confirm delete", Message: "Delete it?", Destructive: true}, keys)
+	_, _ = dialog.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if !strings.Contains(dialog.Content(PlainTheme()), "[ Cancel ]") {
+		t.Fatalf("left arrow moved past Cancel: %q", dialog.Content(PlainTheme()))
+	}
+	_, _ = dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if !strings.Contains(dialog.Content(PlainTheme()), "[ Delete ]") {
+		t.Fatalf("right arrow did not hold Delete focus: %q", dialog.Content(PlainTheme()))
+	}
+	_, _ = dialog.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	_, _ = dialog.Update(tea.KeyMsg{Type: tea.KeyTab})
 	confirmed, canceled = dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if !confirmed || canceled {

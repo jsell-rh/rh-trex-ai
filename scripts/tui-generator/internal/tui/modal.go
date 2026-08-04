@@ -52,12 +52,18 @@ func (host ModalHost) Render(base string, width, height int, theme Theme) string
 	if footer := host.dialog.Footer(theme); footer != "" {
 		content += "\n\n" + footer
 	}
-	dialogWidth := min(max(12, ansi.StringWidth(host.dialog.Title())+4), max(1, width-2))
+	title := host.dialog.Title()
+	if host.dialog.Kind() == DialogConfirmation {
+		title = "<" + title + ">"
+	}
+	horizontalMargin := min(5, max(1, width/10))
+	maxDialogWidth := max(1, width-horizontalMargin*2)
+	dialogWidth := min(max(12, ansi.StringWidth(title)+4), maxDialogWidth)
 	for _, line := range strings.Split(content, "\n") {
-		dialogWidth = min(max(dialogWidth, ansi.StringWidth(line)+4), max(1, width-2))
+		dialogWidth = min(max(dialogWidth, ansi.StringWidth(line)+4), maxDialogWidth)
 	}
 	dialogHeight := min(max(3, strings.Count(content, "\n")+3), height)
-	dialog := theme.Frame(host.dialog.Title(), PageReady, content, dialogWidth, dialogHeight)
+	dialog := theme.Frame(title, PageReady, content, dialogWidth, dialogHeight)
 	return overlayBlock(base, dialog, width, height, theme)
 }
 

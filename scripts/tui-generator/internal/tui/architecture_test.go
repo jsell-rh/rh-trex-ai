@@ -70,9 +70,10 @@ func TestArchitectureGateRejectsSyntheticPageOwnedFormAndDialogActionLayout(t *t
 func badPage(theme Theme, hint ShortcutHint, field formFieldDescriptor) {
 	_ = formFieldType(field)
 	_ = theme.DialogAction(hint, true)
+	_ = theme.DialogButton("Delete", true)
 }
 `})
-	if len(failures) < 2 {
+	if len(failures) < 3 {
 		t.Fatalf("architecture gate accepted duplicated form/dialog action policy: %v", failures)
 	}
 }
@@ -124,6 +125,9 @@ func presentationPolicyViolations(sources map[string]string) []string {
 		}
 		if name != "theme.go" && name != "form.go" && strings.Contains(source, ".DialogAction(") {
 			failures = append(failures, name+": dialog-action layout outside form.go")
+		}
+		if name != "theme.go" && name != "form.go" && strings.Contains(source, ".DialogButton(") {
+			failures = append(failures, name+": dialog-button layout outside form.go")
 		}
 		if name != "alert.go" && (strings.Contains(source, "alertLifetime") || strings.Contains(source, "alertPriority(")) {
 			failures = append(failures, name+": alert lifetime/priority outside alert.go")

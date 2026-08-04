@@ -46,6 +46,7 @@ type View struct {
 	GetOperationID     string   `json:"getOperationId,omitempty"`
 	StreamOperationIDs []string `json:"streamOperationIds,omitempty"`
 	Source             Source   `json:"source"`
+	FillWidth          bool     `json:"-"`
 }
 
 type Column struct {

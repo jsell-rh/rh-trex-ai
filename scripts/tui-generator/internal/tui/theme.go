@@ -94,6 +94,22 @@ func (theme Theme) DialogAction(hint ShortcutHint, primary bool) string {
 	return theme.FieldMetadata(value)
 }
 
+func (theme Theme) DialogButton(label string, focused bool) string {
+	label = SanitizeCell(label)
+	if theme.plain {
+		if focused {
+			return "[ " + label + " ]"
+		}
+		return "  " + label + "  "
+	}
+	value := " " + label + " "
+	if focused {
+		style := theme.SelectedBackground.Inherit(theme.SelectedForeground).Bold(true)
+		return style.Render(value)
+	}
+	return theme.Subtle(value)
+}
+
 func (theme Theme) Shortcut(shortcut ShortcutHint, keyWidth int) string {
 	tokenWidth := ansi.StringWidth("<" + shortcut.Key + ">")
 	padding := strings.Repeat(" ", max(1, keyWidth-tokenWidth+1))
@@ -110,6 +126,16 @@ func (theme Theme) BreadcrumbBadge(label string, active bool) string {
 
 func (theme Theme) FrameLabel(title PageFrameTitle, state PageState) string {
 	kind := SanitizeCell(title.Kind)
+	if title.Simple {
+		label := theme.Header(kind)
+		if filter := SanitizeCell(title.Filter); filter != "" {
+			label += " " + theme.render(theme.FilterBadge, "</"+filter+">")
+		}
+		if state != PageReady {
+			label += theme.Standard(" · ") + theme.PageState(state, string(state))
+		}
+		return label
+	}
 	context := SanitizeCell(title.Context)
 	if context == "" {
 		context = "all"

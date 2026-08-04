@@ -16,11 +16,8 @@ func resourceCatalogView() View {
 	return View{
 		ID: resourceCatalogID, Kind: "collection", Label: resourceCatalogLabel,
 		IdentityProperty: "view_id", DefaultSort: "resource",
-		Columns: []Column{
-			{Property: "resource", Label: "RESOURCE", Priority: 100, Type: "string"},
-			{Property: "scope", Label: "SCOPE", Priority: 80, Type: "string"},
-			{Property: "status", Label: "STATUS", Priority: 90, Type: "string"},
-		},
+		Columns:   []Column{{Property: "resource", Label: "RESOURCE", Priority: 100, Type: "string"}},
+		FillWidth: true,
 	}
 }
 
@@ -32,25 +29,12 @@ func (model *Model) rebuildCatalog() {
 }
 
 func (model *Model) catalogItems() []map[string]any {
-	bindings := availableBindings(model.frames)
 	items := make([]map[string]any, 0, len(model.descriptor.Views))
 	for _, view := range model.descriptor.Views {
-		if view.ListOperationID == "" {
+		if view.ListOperationID == "" || len(view.ScopeParameters) > 0 {
 			continue
 		}
-		scope := "global"
-		if len(view.ScopeParameters) > 0 {
-			scope = strings.Join(view.ScopeParameters, ", ")
-		}
-		ready := bindingsCover(view.ScopeParameters, bindings)
-		status := "ready"
-		if !ready {
-			status = "requires context"
-		}
-		items = append(items, map[string]any{
-			"view_id": view.ID, "resource": view.Label, "scope": scope,
-			"status": status, "ready": ready,
-		})
+		items = append(items, map[string]any{"view_id": view.ID, "resource": view.Label})
 	}
 	return items
 }

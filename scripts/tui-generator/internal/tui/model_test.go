@@ -56,7 +56,7 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(110, 32))
 	t.Cleanup(func() { _ = testModel.Quit() })
 
-	waitForTexts(t, testModel, "Resources(all)[4]", "Children", "requires context")
+	waitForTexts(t, testModel, "Resources", "Accounts", "Parents", "Public Children")
 	testModel.Type(":parents")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Alpha")
@@ -107,7 +107,7 @@ func TestGeneratedRuntimeNavigationWithTeatest(t *testing.T) {
 	}
 }
 
-func TestResourceCatalogShowsAllViewsAndGuardsMissingContext(t *testing.T) {
+func TestResourceCatalogShowsOnlyTopLevelResourcesInOneColumn(t *testing.T) {
 	requests := make(chan string, 8)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests <- request.URL.EscapedPath()
@@ -120,26 +120,31 @@ func TestResourceCatalogShowsAllViewsAndGuardsMissingContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	catalog := resourceCatalogView()
+	if len(catalog.Columns) != 1 || catalog.Columns[0].Property != "resource" {
+		t.Fatalf("catalog columns = %#v", catalog.Columns)
+	}
+	if !catalog.FillWidth {
+		t.Fatal("catalog resource column does not fill the table width")
+	}
+	if len(model.rows) != 3 || model.rows[0].Raw["resource"] != "Accounts" || model.rows[1].Raw["resource"] != "Parents" || model.rows[2].Raw["resource"] != "Public Children" {
+		t.Fatalf("top-level catalog rows = %#v", model.rows)
+	}
+	initial := model.View()
+	if strings.Contains(initial, "Resources(all)") || strings.Contains(initial, "SCOPE") || strings.Contains(initial, "STATUS") || strings.Contains(initial, "requires context") {
+		t.Fatalf("catalog leaked API debugging metadata:\n%s", initial)
+	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(100, 30))
 	t.Cleanup(func() { _ = testModel.Quit() })
 
-	waitForTexts(t, testModel, "Resources(all)[4]", "Accounts", "Children", "Parents", "Public Children", "requires context")
+	waitForTexts(t, testModel, "Resources", "Accounts", "Parents", "Public Children")
 	select {
 	case path := <-requests:
 		t.Fatalf("catalog startup made request %q", path)
 	default:
 	}
 
-	// Catalog rows sort by resource name: Accounts, Children, Parents, Public Children.
-	testModel.Send(tea.KeyMsg{Type: tea.KeyDown})
-	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "Children requires context: parent_id")
-	select {
-	case path := <-requests:
-		t.Fatalf("unavailable scoped resource made request %q", path)
-	default:
-	}
-
+	// Catalog rows sort by resource name: Accounts, Parents, Public Children.
 	testModel.Send(tea.KeyMsg{Type: tea.KeyDown})
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForTexts(t, testModel, "Alpha", "<resources>", "<parents>")
@@ -153,7 +158,7 @@ func TestResourceCatalogShowsAllViewsAndGuardsMissingContext(t *testing.T) {
 	}
 
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	waitForText(t, testModel, "Resources(all)[4]")
+	waitForTexts(t, testModel, "Resources", "Accounts", "Parents", "Public Children")
 	select {
 	case path := <-requests:
 		t.Fatalf("returning to catalog made request %q", path)
@@ -161,7 +166,7 @@ func TestResourceCatalogShowsAllViewsAndGuardsMissingContext(t *testing.T) {
 	}
 }
 
-func TestResourceCatalogDoesNotRequireAGlobalCollection(t *testing.T) {
+func TestResourceCatalogIsEmptyWhenNoTopLevelCollectionExists(t *testing.T) {
 	descriptor := Descriptor{
 		Title: "Scoped only",
 		Views: []View{{
@@ -177,7 +182,8 @@ func TestResourceCatalogDoesNotRequireAGlobalCollection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !model.onCatalog() || len(model.rows) != 1 || model.rows[0].Raw["status"] != "requires context" || model.Init() == nil {
+	model.shell.Theme = PlainTheme()
+	if !model.onCatalog() || len(model.rows) != 0 || model.Init() == nil || !strings.Contains(model.View(), "Resources") || strings.Contains(model.View(), "Resources(all)") {
 		t.Fatalf("scoped-only catalog state = catalog %v, rows %#v", model.onCatalog(), model.rows)
 	}
 	if command := model.loadCurrent(); command != nil {
@@ -222,7 +228,7 @@ func TestStreamingIsIncrementalBoundedSanitizedAndCancelable(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(100, 30))
 	t.Cleanup(func() { _ = testModel.Quit() })
-	waitForText(t, testModel, "Resources(all)[1]")
+	waitForText(t, testModel, "↑ RESOURCE")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "One")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
@@ -292,7 +298,7 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(110, 30))
 	t.Cleanup(func() { _ = testModel.Quit() })
-	waitForText(t, testModel, "Resources(all)[1]")
+	waitForTexts(t, testModel, "Resources", "Things")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Things(all)[0]")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
@@ -391,7 +397,7 @@ func TestHighlightedItemActionUsesExactBoundPathWithTeatest(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(110, 30))
 	t.Cleanup(func() { _ = testModel.Quit() })
-	waitForText(t, testModel, "Resources(all)[1]")
+	waitForTexts(t, testModel, "Resources", "Dinosaur")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Tyrannosaurus")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
@@ -516,7 +522,7 @@ func TestAPIErrorIsInlineAndTerminalSafe(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(90, 25))
 	t.Cleanup(func() { _ = testModel.Quit() })
-	waitForText(t, testModel, "Resources(all)[1]")
+	waitForTexts(t, testModel, "Resources", "Things")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "safe error")
 	output := readOutput(t, testModel.Output())
@@ -558,7 +564,7 @@ func TestBreadcrumbSanitizesAPIDerivedIdentityWithTeatest(t *testing.T) {
 	}
 	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(90, 25))
 	t.Cleanup(func() { _ = testModel.Quit() })
-	waitForText(t, testModel, "Resources(all)[1]")
+	waitForTexts(t, testModel, "Resources", "Items")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Safe")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
@@ -919,22 +925,20 @@ func TestOperationHotkeyUsesSafeConfirmationAndSubmitsOnce(t *testing.T) {
 		_, _ = io.WriteString(writer, `{"items":[]}`)
 	}))
 	defer server.Close()
-	descriptor := Descriptor{
-		Title: "Action confirmation", Servers: []Server{{URL: server.URL}},
-		Views: []View{{ID: "things", Kind: "collection", Label: "Things", OperationIDs: []string{"listThings", "deleteThings"}, ListOperationID: "listThings"}},
-		Operations: []Operation{
-			{ID: "listThings", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/things"}}, Response: ResponseShape{ItemsPointer: "/items"}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}},
-			{ID: "deleteThings", Method: http.MethodDelete, PathParts: []PathPart{{Literal: "/things"}}, SuccessStatuses: []string{"204"}, Capabilities: []string{"delete"}, Security: EffectiveSecurity{None: true}, Presentation: ActionPresentation{Label: "Delete all", Hotkey: "x", Confirmation: &Confirmation{Title: "Confirm delete", Message: "Delete all things?", Destructive: true}}},
-		},
-	}
+	descriptor := confirmationTestDescriptor(server.URL)
 	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
+	model.shell.Theme = PlainTheme()
 	activateResource(t, model, "things")
 	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	if command != nil || model.mode != modeConfirmation || model.confirmation == nil || model.confirmation.confirmFocus {
 		t.Fatalf("hotkey confirmation state = mode %v, dialog %#v, command %v", model.mode, model.confirmation, command)
+	}
+	rendered := model.View()
+	if !strings.Contains(rendered, "<Confirm delete>") || !strings.Contains(rendered, "[ Cancel ]") || !strings.Contains(rendered, "Delete all things?") || strings.Contains(rendered, "DESTRUCTIVE") {
+		t.Fatalf("rendered confirmation is not compact and safe:\n%s", rendered)
 	}
 	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if command != nil || model.mode != modeBrowse || actionRequests != 0 {
@@ -958,6 +962,57 @@ func TestOperationHotkeyUsesSafeConfirmationAndSubmitsOnce(t *testing.T) {
 	_, _ = model.handleResult(refresh().(operationResultMsg))
 	if actionRequests != 1 || model.mode != modeBrowse {
 		t.Fatalf("post-action state = requests %d, mode %v", actionRequests, model.mode)
+	}
+}
+
+func TestCompactDestructiveConfirmationWithTeatest(t *testing.T) {
+	requests := make(chan struct{}, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodDelete {
+			requests <- struct{}{}
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"items":[]}`)
+	}))
+	defer server.Close()
+
+	model, err := NewModel(confirmationTestDescriptor(server.URL), ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.shell.Theme = PlainTheme()
+	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(100, 30))
+	t.Cleanup(func() { _ = testModel.Quit() })
+	waitForTexts(t, testModel, "Resources", "Things")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "Things(all)[0]")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	waitForTexts(t, testModel, "<Confirm delete>", "Delete all things?", "[ Cancel ]")
+	select {
+	case <-requests:
+		t.Fatal("opening confirmation sent the destructive request")
+	default:
+	}
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "Action canceled")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	waitForText(t, testModel, "[ Cancel ]")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyRight})
+	waitForText(t, testModel, "[ Delete ]")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "Operation completed")
+	select {
+	case <-requests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("confirmed delete request was not received")
+	}
+	select {
+	case <-requests:
+		t.Fatal("duplicate submit sent a second delete request")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -1056,6 +1111,17 @@ func actionOperationIDs(operations []Operation) []string {
 		result = append(result, operation.ID)
 	}
 	return result
+}
+
+func confirmationTestDescriptor(server string) Descriptor {
+	return Descriptor{
+		Title: "Action confirmation", Servers: []Server{{URL: server}},
+		Views: []View{{ID: "things", Kind: "collection", Label: "Things", OperationIDs: []string{"listThings", "deleteThings"}, ListOperationID: "listThings"}},
+		Operations: []Operation{
+			{ID: "listThings", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/things"}}, Response: ResponseShape{ItemsPointer: "/items"}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}},
+			{ID: "deleteThings", Method: http.MethodDelete, PathParts: []PathPart{{Literal: "/things"}}, SuccessStatuses: []string{"204"}, Capabilities: []string{"delete"}, Security: EffectiveSecurity{None: true}, Presentation: ActionPresentation{Label: "Delete all", Hotkey: "x", Confirmation: &Confirmation{Title: "Confirm delete", Message: "Delete all things?", Destructive: true}}},
+		},
+	}
 }
 
 func highlightedItemActionDescriptor(server string) Descriptor {

@@ -55,6 +55,20 @@ func TestContentWidthsAreSemanticAndStable(t *testing.T) {
 	}
 }
 
+func TestFillWidthSingleColumnReachesTableEdge(t *testing.T) {
+	view := View{
+		FillWidth: true,
+		Columns:   []Column{{Property: "resource", Label: "RESOURCE", Type: "string"}},
+	}
+	layout := calculateColumnLayout(view, []Row{{Cells: []string{"Dinosaurs"}}}, 96, 0)
+	if got := columnsDisplayWidth(layout.Widths, 0, len(layout.Widths)); got != 96 {
+		t.Fatalf("fill-width table uses %d cells, want 96", got)
+	}
+	if !reflect.DeepEqual(layout.Visible, []int{0}) || layout.LeftHidden != 0 || layout.RightHidden != 0 {
+		t.Fatalf("fill-width layout = %#v", layout)
+	}
+}
+
 func TestPriorityControlsCompressionWithoutRemovingColumns(t *testing.T) {
 	view := View{Columns: []Column{
 		{Property: "low", Label: "LOW", Priority: 1, Type: "string"},

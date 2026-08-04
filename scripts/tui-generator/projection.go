@@ -561,7 +561,12 @@ func parseConfirmation(raw any, label string, destructive bool) (*tui.Confirmati
 }
 
 func defaultConfirmation(label string, destructive bool) *tui.Confirmation {
-	return &tui.Confirmation{Title: "Confirm " + label, Message: "Run " + label + "?", Destructive: destructive}
+	title := "Confirm"
+	if destructive {
+		title = "Delete"
+	}
+	message := strings.TrimSpace(label)
+	return &tui.Confirmation{Title: title, Message: strings.TrimSuffix(message, "?") + "?", Destructive: destructive}
 }
 
 func actionProjectionLabel(operation tui.Operation) string {

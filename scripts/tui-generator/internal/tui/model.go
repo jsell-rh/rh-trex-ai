@@ -337,6 +337,9 @@ func (model *Model) semanticPage(view View) Page {
 	if state == PageReady && !model.loading && count == 0 {
 		state = PageEmpty
 	}
+	if model.onCatalog() {
+		return ResourceTablePage{SemanticPage{PageTitle: view.Label, PageFilter: model.filter, PageSimpleTitle: true, PageState: state, PageContent: model.tableView(), PageActions: actions}}
+	}
 	return ResourceTablePage{SemanticPage{PageTitle: view.Label, PageScope: model.tableScope(), PageCount: &count, PageFilter: model.filter, PageState: state, PageContent: model.tableView(), PageActions: actions}}
 }
 
