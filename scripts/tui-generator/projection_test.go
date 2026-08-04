@@ -120,6 +120,22 @@ func TestSharedIRConformanceFixtureProjection(t *testing.T) {
 	}
 }
 
+func TestPartialCapabilitiesProjectOnlyDocumentedControls(t *testing.T) {
+	descriptor := loadProjectedFixture(t, "testdata/partial-capabilities.yaml")
+	collection := viewWithOperation(t, descriptor, "listRecords")
+	item := viewWithOperation(t, descriptor, "patchRecord")
+	if !reflect.DeepEqual(collection.Capabilities, []string{"list"}) {
+		t.Fatalf("collection capabilities = %v, want list only", collection.Capabilities)
+	}
+	wantItem := []string{"stream", "update"}
+	if !reflect.DeepEqual(item.Capabilities, wantItem) {
+		t.Fatalf("item capabilities = %v, want %v", item.Capabilities, wantItem)
+	}
+	if got := operationIDs(item.OperationIDs); !reflect.DeepEqual(got, []string{"patchRecord", "streamRecordEvents"}) {
+		t.Fatalf("item controls = %v, want documented patch and stream only", got)
+	}
+}
+
 func TestMappedBindingGrammar(t *testing.T) {
 	for _, testCase := range []struct {
 		name       string

@@ -243,6 +243,31 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 	}
 }
 
+func TestActionChooserUsesOnlyDocumentedCapabilities(t *testing.T) {
+	descriptor := Descriptor{
+		Views: []View{{
+			ID: "record", Kind: "item", Label: "Record",
+			OperationIDs: []string{"patchRecord", "streamRecordEvents"},
+			Capabilities: []string{"stream", "update"},
+		}},
+		Operations: []Operation{
+			{ID: "patchRecord", Method: http.MethodPatch, Capabilities: []string{"update"}},
+			{ID: "streamRecordEvents", Method: http.MethodGet, Capabilities: []string{"stream"}},
+		},
+	}
+	model := &Model{
+		descriptor: descriptor,
+		frames:     []Frame{{TargetViewID: "record", Bindings: map[string]any{}}},
+	}
+	_, _ = model.openActions()
+	if model.mode != modeActions || len(model.chosenOperations) != 2 {
+		t.Fatalf("action chooser state = mode %v, operations %#v", model.mode, model.chosenOperations)
+	}
+	if got := []string{model.chosenOperations[0].ID, model.chosenOperations[1].ID}; !reflect.DeepEqual(got, []string{"patchRecord", "streamRecordEvents"}) {
+		t.Fatalf("action chooser controls = %v, want documented patch and stream only", got)
+	}
+}
+
 func TestAPIErrorIsInlineAndTerminalSafe(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.WriteHeader(http.StatusInternalServerError)
