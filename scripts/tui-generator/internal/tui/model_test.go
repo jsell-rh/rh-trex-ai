@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -188,6 +189,114 @@ func TestResourceCatalogIsEmptyWhenNoTopLevelCollectionExists(t *testing.T) {
 	}
 	if command := model.loadCurrent(); command != nil {
 		t.Fatal("scoped-only catalog created a read command")
+	}
+}
+
+func TestSelectedResourceRawJSONWithTeatest(t *testing.T) {
+	requests := make(chan string, 4)
+	item := map[string]any{
+		"id": "dino-1", "species": "Tyrannosaurus",
+		"traits": map[string]any{"active": true, "periods": []any{"Cretaceous", nil}},
+		"note":   "safe\x1b]52;c;owned\a",
+	}
+	for index := 0; index < 12; index++ {
+		item[fmt.Sprintf("field_%02d", index)] = strings.Repeat(fmt.Sprintf("value-%02d-", index), 5)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests <- request.URL.EscapedPath()
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(map[string]any{"items": []any{item}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+
+	descriptor := highlightedItemActionDescriptor(server.URL)
+	for index := 0; index < 12; index++ {
+		descriptor.Views[0].Columns = append(descriptor.Views[0].Columns, Column{
+			Property: fmt.Sprintf("field_%02d", index), Label: fmt.Sprintf("FIELD %02d", index), Type: "string",
+		})
+	}
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.shell.Theme = PlainTheme()
+	if output := model.View(); strings.Contains(output, "<r>") {
+		t.Fatalf("catalog advertised raw without an API resource:\n%s", output)
+	}
+
+	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(120, 32))
+	t.Cleanup(func() { _ = testModel.Quit() })
+	waitForText(t, testModel, "Resources")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForTexts(t, testModel, "Tyrannos", "<r>", "raw")
+	select {
+	case path := <-requests:
+		if path != "/dinosaurs" {
+			t.Fatalf("initial resource request = %q", path)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("resource selection made no request")
+	}
+
+	testModel.Type("/tyr")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "</tyr>")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyRight})
+	waitForText(t, testModel, "◀ 1")
+	testModel.Type("O")
+	testModel.Type("r")
+	waitForTexts(t, testModel, "Raw Dinosaur", `"traits": {`, `"active": true`, `"periods": [`)
+	rawOutput := readOutput(t, testModel.Output())
+	if bytes.Contains(rawOutput, []byte("owned")) || bytes.Contains(rawOutput, []byte("\x1b]52")) {
+		t.Fatalf("terminal injection reached raw output: %q", rawOutput)
+	}
+	select {
+	case path := <-requests:
+		t.Fatalf("raw resource view made request %q", path)
+	default:
+	}
+
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	waitForTexts(t, testModel, "din", "</tyr>", "◀ 1")
+	if err := testModel.Quit(); err != nil {
+		t.Fatal(err)
+	}
+	final := testModel.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
+	selected := final.selectedRow()
+	if final.mode != modeBrowse || final.filter != "tyr" || !final.sortDescending || selected == nil || selected.Identity != "dino-1" || len(final.frames) != 2 || final.frames[1].ColumnOffset != 1 {
+		t.Fatalf("raw return changed table state: mode=%v filter=%q descending=%v selected=%#v frames=%d offset=%d", final.mode, final.filter, final.sortDescending, selected, len(final.frames), final.frames[1].ColumnOffset)
+	}
+}
+
+func TestRenderRawPreservesJSONTypesAndSanitizesStrings(t *testing.T) {
+	value := map[string]any{
+		"name":   "safe\x1b]52;c;owned\a",
+		"active": true,
+		"count":  float64(7),
+		"nested": []any{"value", nil, map[string]any{"state": "ready\u009bunsafe"}},
+	}
+	raw, err := renderRaw(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid([]byte(raw)) || !strings.Contains(raw, "\n  \"active\": true") {
+		t.Fatalf("raw output is not indented JSON:\n%s", raw)
+	}
+	if strings.Contains(raw, "owned") || strings.Contains(raw, "\x1b") || strings.Contains(raw, "\u009b") {
+		t.Fatalf("raw output retained terminal controls: %q", raw)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["active"] != true || decoded["count"] != float64(7) {
+		t.Fatalf("raw output changed scalar types: %#v", decoded)
+	}
+	nested, ok := decoded["nested"].([]any)
+	if !ok || len(nested) != 3 || nested[1] != nil {
+		t.Fatalf("raw output changed array/null structure: %#v", decoded["nested"])
 	}
 }
 

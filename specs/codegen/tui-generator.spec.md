@@ -256,7 +256,19 @@ The table chrome SHALL reserve non-data space for directional overflow indicator
 
 ### Requirement: Shared Detail and Stream Pages
 
-Every item detail SHALL use one reusable scrollable key-value page with deterministic readable-field ordering and shared wrapping or truncation policy. Every streaming operation SHALL use one reusable viewport page with connection state, autoscroll state, and a deterministically bounded event buffer. Detail and stream pages SHALL receive their frame, header, footer, alerts, sizing, and global keys from the shell and SHALL NOT implement alternate chrome.
+Every item detail SHALL use one reusable scrollable key-value page with deterministic readable-field ordering and shared wrapping or truncation policy. When an API resource row or loaded item is selected, the contextual `r` shortcut SHALL open a raw-resource presentation in the same shared scrollable detail viewport. The raw presentation SHALL format the selected decoded API object as indented JSON, preserve its object, array, scalar, and null structure, sanitize every untrusted key and string value at the rendering boundary, and perform no additional API request. `Esc` SHALL return to the immediately preceding list or item-detail presentation with selection, filter, sort, horizontal offset, and navigation history unchanged. The `r` shortcut SHALL be absent when no API resource object is selected and SHALL be reserved against generated operation hotkeys.
+
+Every streaming operation SHALL use one reusable viewport page with connection state, autoscroll state, and a deterministically bounded event buffer. Detail, raw-resource, and stream pages SHALL receive their frame, header, footer, alerts, sizing, and global keys from the shell and SHALL NOT implement alternate chrome.
+
+#### Scenario: Inspect the selected API resource as raw JSON
+
+- GIVEN a collection row is selected from an API response containing nested objects, arrays, typed scalars, and an untrusted terminal-control string
+- WHEN the user presses `r`
+- THEN the shared detail viewport SHALL show the selected row as indented structurally equivalent JSON without issuing an API request
+- AND the source shortcut palette SHALL advertise `<r> raw` while the raw frame SHALL identify the raw presentation
+- AND terminal-control or framework-markup content SHALL be neutralized before rendering
+- WHEN the user presses `Esc`
+- THEN the original collection, selection, filter, sort, horizontal offset, and navigation history SHALL be restored unchanged
 
 #### Scenario: Preserve shell while streaming
 
@@ -745,7 +757,7 @@ Fixture tests SHALL prove that controls and request inputs are projected only fr
 
 ### Requirement: Runtime Navigation Gate
 
-Generated-runtime acceptance tests SHALL use `httptest` with `teatest` to send user keystrokes and assert initial one-column unscoped catalog rendering without an API request, scoped-view exclusion from the catalog, scoped discovery through parent navigation, catalog entry and return, compact safe destructive confirmation, protected left-prefix sort markers under truncation, resource switching, aliases, filtering, selected-item action discovery and binding, selected-row navigation, relationship choice, details, `Enter` push, `Esc` pop, breadcrumbs, multi-parent history, and inline API errors. The test SHALL exercise generated descriptors rather than a resource-specific fake runtime.
+Generated-runtime acceptance tests SHALL use `httptest` with `teatest` to send user keystrokes and assert initial one-column unscoped catalog rendering without an API request, scoped-view exclusion from the catalog, scoped discovery through parent navigation, catalog entry and return, compact safe destructive confirmation, protected left-prefix sort markers under truncation, resource switching, aliases, filtering, selected-item raw JSON inspection without another request, selected-item action discovery and binding, selected-row navigation, relationship choice, details, `Enter` push, `Esc` pop, breadcrumbs, multi-parent history, and inline API errors. The test SHALL exercise generated descriptors rather than a resource-specific fake runtime.
 
 #### Scenario: Enter and Escape preserve scope
 

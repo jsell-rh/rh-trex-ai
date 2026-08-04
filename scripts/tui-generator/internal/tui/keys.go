@@ -24,6 +24,7 @@ const (
 	KeyPreviousFocus    BindingID = "previous-focus"
 	KeyNavigate         BindingID = "navigate"
 	KeyDetail           BindingID = "detail"
+	KeyRaw              BindingID = "raw"
 	KeyActions          BindingID = "actions"
 	KeyColumnsLeft      BindingID = "columns-left"
 	KeyColumnsRight     BindingID = "columns-right"
@@ -78,6 +79,7 @@ func DefaultKeyRegistry() KeyRegistry {
 		{KeyPreviousFocus, key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous field")), true, 80, 60},
 		{KeyNavigate, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "navigate")), false, 90, 75},
 		{KeyDetail, key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "detail")), false, 100, 70},
+		{KeyRaw, key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "raw")), false, 105, 70},
 		{KeyActions, key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "actions")), false, 110, 70},
 		{KeyColumnsLeft, key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "columns left")), false, 120, 65},
 		{KeyColumnsRight, key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "columns right")), false, 130, 65},

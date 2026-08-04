@@ -595,6 +595,9 @@ func TestControlActionHotkeysUseMetadataGrammarAndBubbleTeaDispatch(t *testing.T
 	if !registry.Reserved("ctrl-c") {
 		t.Fatal("metadata-form global control key was not reserved")
 	}
+	if !registry.Reserved("r") {
+		t.Fatal("raw-resource key was not reserved")
+	}
 	operation := Operation{Presentation: ActionPresentation{Hotkey: "ctrl-z"}}
 	if !registry.ActionMatches(tea.KeyMsg{Type: tea.KeyCtrlZ}, operation) {
 		t.Fatal("metadata-form control key did not match Bubble Tea key event")

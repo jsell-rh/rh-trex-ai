@@ -293,6 +293,7 @@ func TestInvalidPresentationExtensionsFailBeforeWriting(t *testing.T) {
 		{name: "terminal control label", old: "        label: Parents", replacement: "        label: \"bad\\u001b[31m\"", want: "terminal-safe string"},
 		{name: "unsupported action visibility", old: "        hotkey: x", replacement: "        hotkey: x\n        visibility: hidden", want: `x-trex-tui field "visibility" is unsupported`},
 		{name: "local action hotkey", old: "        hotkey: x", replacement: "        hotkey: a", want: `hotkey "a" conflicts with the shared keybinding registry`},
+		{name: "raw resource hotkey", old: "        hotkey: x", replacement: "        hotkey: r", want: `hotkey "r" conflicts with the shared keybinding registry`},
 		{name: "global control hotkey", old: "        hotkey: x", replacement: "        hotkey: ctrl-c", want: `hotkey "ctrl-c" conflicts with the shared keybinding registry`},
 		{name: "unsafe confirmation", old: "          message: Archive the selected child?", replacement: "          message: \"bad\\u001b[31m\"", want: "message must be a non-empty terminal-safe string"},
 		{name: "incomplete explicit binding", old: "            children:\n              operationId: listChildren\n              parameters: {parent_id: \"$response.body#/id\"}", replacement: "            children:\n              operationId: listAmbiguousChildren", want: "unsatisfied path parameters: organization_id, project_id"},

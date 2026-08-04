@@ -68,6 +68,7 @@ const (
 	modeActionInput
 	modeConfirmation
 	modeDetail
+	modeRaw
 	modeHelp
 	modeAlertDetails
 )
@@ -88,6 +89,7 @@ type Model struct {
 	chooser          table.Model
 	mode             mode
 	previousMode     mode
+	rawReturnMode    mode
 	width            int
 	height           int
 	loading          bool
@@ -243,7 +245,7 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.table, command = model.table.Update(message)
 		return model, command
 	}
-	if model.mode == modeDetail {
+	if model.mode == modeDetail || model.mode == modeRaw {
 		var command tea.Cmd
 		model.detail, command = model.detail.Update(message)
 		return model, command
@@ -327,6 +329,9 @@ func (model *Model) semanticPage(view View) Page {
 	if model.mode == modeBrowse {
 		actions = model.localActions(view)
 	}
+	if model.mode == modeRaw {
+		return DetailPage{SemanticPage{PageTitle: "Raw " + view.Label, PageScope: model.scope(), PageState: state, PageContent: model.detail.View()}}
+	}
 	if model.mode == modeDetail {
 		return DetailPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.detail.View(), PageActions: actions}}
 	}
@@ -369,6 +374,8 @@ func (model *Model) applicableKeysForMode(activeMode mode) []BindingID {
 		keys = []BindingID{KeyNextFocus, KeySubmit, KeyCancel, KeyHelp, KeyForceQuit}
 	case modeDetail:
 		keys = []BindingID{KeyNavigate, KeyCancel, KeyHelp, KeyQuit}
+	case modeRaw:
+		keys = []BindingID{KeyCancel, KeyHelp, KeyQuit}
 	case modeCatalog:
 		keys = []BindingID{KeyCommand, KeyFilter, KeyNavigate, KeySortNext, KeySortDirection, KeyHelp, KeyQuit}
 	default:
@@ -388,7 +395,18 @@ func (model *Model) applicableKeysForMode(activeMode mode) []BindingID {
 	if view := model.currentView(); activeMode == modeDetail && view != nil && view.Kind == "stream" {
 		keys = append(keys, KeyToggleAutoscroll)
 	}
+	if model.rawResourceAvailable(activeMode) {
+		keys = append(keys, KeyRaw)
+	}
 	return keys
+}
+
+func (model *Model) rawResourceAvailable(activeMode mode) bool {
+	if activeMode != modeBrowse && activeMode != modeDetail {
+		return false
+	}
+	view := model.currentView()
+	return view != nil && !model.onCatalog() && view.Kind != "stream" && model.selectedRow() != nil
 }
 
 func (model *Model) helpContent(view View) string {
@@ -449,7 +467,7 @@ func (model *Model) tableView() string {
 
 func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	model.ensurePresentation()
-	if model.shell.Keys.Matches(key, KeyForceQuit) || (model.shell.Keys.Matches(key, KeyQuit) && (model.mode == modeCatalog || model.mode == modeBrowse || model.mode == modeDetail)) {
+	if model.shell.Keys.Matches(key, KeyForceQuit) || (model.shell.Keys.Matches(key, KeyQuit) && (model.mode == modeCatalog || model.mode == modeBrowse || model.mode == modeDetail || model.mode == modeRaw)) {
 		model.cancelStream()
 		return model, tea.Quit
 	}
@@ -494,7 +512,19 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if model.mode == modeRelationships || model.mode == modeActions {
 		return model.handleChooserKey(key)
 	}
+	if model.mode == modeRaw {
+		if model.shell.Keys.Matches(key, KeyCancel) {
+			model.closeRawResource()
+			return model, nil
+		}
+		var command tea.Cmd
+		model.detail, command = model.detail.Update(key)
+		return model, command
+	}
 	if model.mode == modeDetail {
+		if model.shell.Keys.Matches(key, KeyRaw) {
+			return model.openRawResource()
+		}
 		if model.shell.Keys.Matches(key, KeyCancel) {
 			view := model.currentView()
 			wasStreaming := model.streamEvents != nil || model.streamCancel != nil
@@ -555,6 +585,8 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		model.detail.SetContent(renderDetail(row.Raw))
 		model.mode = modeDetail
 		return model, nil
+	case model.shell.Keys.Matches(key, KeyRaw):
+		return model.openRawResource()
 	case model.shell.Keys.Matches(key, KeyActions):
 		if model.onCatalog() {
 			return model, nil
@@ -583,6 +615,40 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var command tea.Cmd
 	model.table, command = model.table.Update(key)
 	return model, command
+}
+
+func (model *Model) openRawResource() (tea.Model, tea.Cmd) {
+	if model.onCatalog() {
+		return model, nil
+	}
+	row := model.selectedRow()
+	if row == nil {
+		model.alertWarning("selection", "No selected item")
+		return model, nil
+	}
+	raw, err := renderRaw(row.Raw)
+	if err != nil {
+		model.alertError("raw", err.Error())
+		return model, nil
+	}
+	model.rawReturnMode = model.mode
+	model.detail.SetContent(raw)
+	model.detail.GotoTop()
+	model.mode = modeRaw
+	return model, nil
+}
+
+func (model *Model) closeRawResource() {
+	returnMode := model.rawReturnMode
+	if returnMode == modeDetail {
+		if row := model.selectedRow(); row != nil {
+			model.detail.SetContent(renderDetail(row.Raw))
+			model.detail.GotoTop()
+		}
+	} else {
+		returnMode = modeBrowse
+	}
+	model.mode = returnMode
 }
 
 func (model *Model) handleInputKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
