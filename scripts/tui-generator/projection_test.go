@@ -37,6 +37,18 @@ func TestNavigationProjectionGraphConformance(t *testing.T) {
 
 	assertExplicitRuntimeEdge(t, descriptor, parentItem.ID, scopedChildren.ID, "getParent", "$response.body#/id")
 	assertExplicitRuntimeEdge(t, descriptor, accountItem.ID, scopedChildren.ID, "getAccount", "$response.body#/id")
+	explicitParentEdges := 0
+	for _, edge := range descriptor.Edges {
+		if edge.SourceViewID == parentItem.ID && edge.TargetViewID == scopedChildren.ID {
+			explicitParentEdges++
+			if edge.Provenance != "explicit-link" {
+				t.Fatalf("inferred edge survived explicit precedence: %#v", edge)
+			}
+		}
+	}
+	if explicitParentEdges != 1 {
+		t.Fatalf("parent-to-children edge count = %d, want one explicit edge", explicitParentEdges)
+	}
 
 	childItem := viewWithOperation(t, descriptor, "getChild")
 	itemEdge := edgeBetween(t, descriptor, scopedChildren.ID, childItem.ID)
@@ -72,6 +84,36 @@ func TestNavigationProjectionGraphConformance(t *testing.T) {
 	archive := operationByID(t, descriptor, "archiveChild")
 	if gap := requiredProjectionInputs(*archive); !reflect.DeepEqual(gap, []string{"header:X-Reason", "query:notify"}) {
 		t.Fatalf("action required inputs = %#v", gap)
+	}
+}
+
+func TestSharedIRConformanceFixtureProjection(t *testing.T) {
+	document, err := ir.Load(filepath.Join("..", "openapi-ir", "testdata", "conformance", "openapi.yaml"), ir.LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, projectionErr := projectDocument(document)
+	if projectionErr == nil || !strings.Contains(projectionErr.Error(), "no supported HTTP bearer alternative") || !strings.Contains(projectionErr.Error(), "oauth") {
+		t.Fatalf("shared fixture projection error = %v, want unsupported OAuth diagnostic", projectionErr)
+	}
+
+	list := operationByID(t, descriptor, "listWidgets")
+	if !list.Security.None || !reflect.DeepEqual(list.Capabilities, []string{"list"}) || list.Response.ItemsPointer != "/items" {
+		t.Fatalf("shared list projection = %#v", list)
+	}
+	path, err := tui.BuildPath(*list, map[string]any{})
+	if err != nil || path != "/widgets" {
+		t.Fatalf("shared list path = %q, err=%v", path, err)
+	}
+	create := operationByID(t, descriptor, "createWidget")
+	if create.RequestBody == nil || !create.RequestBody.Required || !reflect.DeepEqual(create.Capabilities, []string{"create"}) {
+		t.Fatalf("shared create projection = %#v", create)
+	}
+	collection := viewWithOperation(t, descriptor, "listWidgets")
+	item := viewWithOperation(t, descriptor, "getWidget")
+	edge := edgeBetween(t, descriptor, collection.ID, item.ID)
+	if edge.Provenance != "explicit-link" || !edge.Navigable || !reflect.DeepEqual(bindingSummary(edge.Bindings), []string{"widget_id:runtime-expression:$response.body#/items/0/id"}) {
+		t.Fatalf("shared relationship projection = %#v", edge)
 	}
 }
 

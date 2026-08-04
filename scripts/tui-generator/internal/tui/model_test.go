@@ -228,6 +228,48 @@ func TestAPIErrorIsInlineAndTerminalSafe(t *testing.T) {
 	}
 }
 
+func TestBreadcrumbSanitizesAPIDerivedIdentityWithTeatest(t *testing.T) {
+	const injectedID = "one\x1b]52;c;breadcrumb-owned\x07"
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path == "/items" {
+			_, _ = io.WriteString(writer, `{"items":[{"id":"one\u001b]52;c;breadcrumb-owned\u0007","name":"Safe"}]}`)
+			return
+		}
+		if strings.HasPrefix(request.URL.Path, "/items/"+injectedID) {
+			_, _ = io.WriteString(writer, `{"id":"one\u001b]52;c;breadcrumb-owned\u0007","name":"Safe detail"}`)
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	defer server.Close()
+	descriptor := Descriptor{
+		Title: "Breadcrumb test", Servers: []Server{{URL: server.URL}},
+		Views: []View{
+			{ID: "items", Kind: "collection", Label: "Items", IdentityProperty: "id", Columns: []Column{{Property: "name", Label: "NAME"}}, OperationIDs: []string{"listItems"}, ListOperationID: "listItems"},
+			{ID: "item", Kind: "item", Label: "Item", IdentityProperty: "id", Columns: []Column{{Property: "name", Label: "NAME"}}, OperationIDs: []string{"getItem"}, GetOperationID: "getItem"},
+		},
+		Operations: []Operation{
+			{ID: "listItems", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/items"}}, Response: ResponseShape{ItemsPointer: "/items"}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}},
+			{ID: "getItem", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/items/"}, {Parameter: "item_id"}}, Parameters: []Parameter{{Name: "item_id", In: "path", Required: true, Type: "string"}}, SuccessStatuses: []string{"200"}, Capabilities: []string{"get"}, Security: EffectiveSecurity{None: true}},
+		},
+		Edges: []Edge{{ID: "items-item", Name: "details", SourceViewID: "items", TargetViewID: "item", TargetOperationID: "getItem", Provenance: "collection-item", Bindings: []Binding{{Target: "item_id", SourceKind: "row-property", Source: "id"}}, Navigable: true}},
+	}
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(90, 25))
+	t.Cleanup(func() { _ = testModel.Quit() })
+	waitForText(t, testModel, "Safe")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForTexts(t, testModel, "Safe detail", "Items > Item[one]")
+	output := readOutput(t, testModel.Output())
+	if bytes.Contains(output, []byte("breadcrumb-owned")) || bytes.Contains(output, []byte("\x1b]52")) {
+		t.Fatalf("unsafe breadcrumb identity reached output: %q", output)
+	}
+}
+
 func TestEvaluateExplicitRuntimeBindingsAndMissingValue(t *testing.T) {
 	frame := Frame{Bindings: map[string]any{"project_id": "project/1"}}
 	row := Row{Raw: map[string]any{"id": "agent/7"}}

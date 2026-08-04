@@ -61,10 +61,10 @@ func projectDocument(document *ir.Document) (tui.Descriptor, error) {
 	projector.validateAliases()
 	projector.recordUnaddressableScopes()
 	projector.finish()
-	if len(projector.fatal) > 0 {
-		return tui.Descriptor{}, errors.Join(projector.fatal...)
-	}
 	projector.descriptor.Diagnostics = append(projector.descriptor.Diagnostics, projector.warnings...)
+	if len(projector.fatal) > 0 {
+		return projector.descriptor, errors.Join(projector.fatal...)
+	}
 	return projector.descriptor, nil
 }
 
