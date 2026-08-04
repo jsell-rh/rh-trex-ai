@@ -17,17 +17,19 @@ import (
 const maxResponseBytes = 8 << 20
 
 type ClientConfig struct {
-	BaseURL        string
-	Token          string
-	Insecure       bool
-	TrustedOrigins []string
-	HTTPClient     *http.Client
+	BaseURL         string
+	Token           string
+	Insecure        bool
+	TrustedOrigins  []string
+	HTTPClient      *http.Client
+	RefreshInterval time.Duration
 }
 
 type Client struct {
 	descriptor       Descriptor
 	config           ClientConfig
 	httpClient       *http.Client
+	streamClient     *http.Client
 	credentialOrigin string
 	trustedOrigins   map[string]bool
 }
@@ -73,6 +75,8 @@ func NewClient(descriptor Descriptor, config ClientConfig) (*Client, error) {
 			},
 		}
 	}
+	streamClient := *httpClient
+	streamClient.Timeout = 0
 	trusted := make(map[string]bool)
 	for _, raw := range config.TrustedOrigins {
 		originURL, parseErr := url.Parse(raw)
@@ -82,7 +86,7 @@ func NewClient(descriptor Descriptor, config ClientConfig) (*Client, error) {
 		trusted[origin(originURL)] = true
 	}
 	return &Client{
-		descriptor: descriptor, config: config, httpClient: httpClient,
+		descriptor: descriptor, config: config, httpClient: httpClient, streamClient: &streamClient,
 		credentialOrigin: origin(parsed), trustedOrigins: trusted,
 	}, nil
 }
@@ -127,7 +131,7 @@ func (client *Client) OpenStream(ctx context.Context, operation Operation, input
 	if err != nil {
 		return nil, err
 	}
-	response, err := client.httpClient.Do(request)
+	response, err := client.streamClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("stream %s: %w", operation.ID, err)
 	}

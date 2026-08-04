@@ -32,7 +32,7 @@ resolved OpenAPI -> canonical IR -> TUI descriptors -> generic runtime
 | Service-neutral identity | Chrome SHALL derive identity and connection context from OpenAPI and runtime configuration and SHALL contain no TRex- or resource-specific branding |
 | One application shell | Header, command bar, page frame, breadcrumb footer, alert rail, modal host, sizing, and focus coordination SHALL each have one shared implementation |
 | Semantic composition | Pages SHALL describe content and local actions by composing shared components; they SHALL NOT recreate chrome, dialogs, alerts, key handling, or styles |
-| One source of presentation truth | Theme tokens, layout breakpoints, global keybindings, hints, alert policy, and dialog behavior SHALL each be defined centrally |
+| One source of presentation truth | Theme tokens, continuous layout policy, global keybindings, hints, alert policy, and dialog behavior SHALL each be defined centrally |
 | Capability-derived interaction | Controls and forms SHALL be produced from canonical operation descriptors and SHALL NOT be added for a literal resource name |
 | Responsive degradation | Constrained terminals SHALL compress content and expose navigable overflow before omitting navigation, active context, or alert visibility |
 | Spatially stable errors | Every error SHALL have a sanitized summary in one bottom-anchored alert rail whose terminal row does not move between pages or interaction modes |
@@ -58,7 +58,7 @@ The generic runtime SHALL compose screens through the following shell. The alert
 | Application shell | Owns full-screen layout, focus, sizing, component placement, and page/modal composition |
 | Header | Renders service-neutral identity, connection, authentication, scope, refresh, and contextual action state |
 | Command/filter bar | Provides the shared `:` command and `/` filter input surface and returns its space to the page when inactive |
-| Page frame | Provides the shared title, border, loading, empty, forbidden, stale, and terminal-too-small presentation around active page content |
+| Page frame | Provides the shared title, border, loading, empty, forbidden, and stale presentation around active page content |
 | Resource table page | Renders descriptor-defined lists through one reusable selectable, sortable, filterable, horizontally scrollable table component |
 | Detail page | Renders readable fields through one reusable scrollable key-value component |
 | Stream page | Renders bounded event output and stream state through one reusable viewport component |
@@ -66,7 +66,7 @@ The generic runtime SHALL compose screens through the following shell. The alert
 | Alert manager and rail | Applies one severity, lifetime, redaction, queuing, and fixed-location policy to every alert and error |
 | Modal host | Owns overlay placement and focus for at most one help, choice, confirmation, or form dialog |
 | Dialog primitives | Provide shared frame, buttons, focus order, cancellation, validation, and in-flight behavior |
-| Theme and layout | Provide semantic styles and deterministic full, compact, and terminal-too-small measurements |
+| Theme and layout | Provide semantic styles and deterministic continuous measurements without imposing a minimum terminal width |
 | Keybinding registry | Drives dispatch, reserved-key validation, contextual hints, and help from one definition |
 
 ## Requirements
@@ -130,15 +130,16 @@ The runtime SHALL define semantic theme tokens for primary, secondary, normal, m
 
 ### Requirement: Centralized Responsive Layout
 
-One shared layout component SHALL calculate all shell and content dimensions from Bubble Tea window-size messages and deterministic named breakpoints. It SHALL expose full, compact, and terminal-too-small modes to child components. Compact mode SHALL hide optional header metadata and low-priority hints, then compress table columns to their shared minimums and expose horizontal overflow rather than remove declared columns solely because of terminal width. It SHALL NOT hide active page identity, navigation, overflow affordances, or the alert rail. Terminal-too-small mode SHALL render one shared explanatory state inside the shell and SHALL NOT panic, produce negative dimensions, or allow a child component to perform independent terminal-size arithmetic.
+One shared layout component SHALL calculate all shell and content dimensions continuously from Bubble Tea window-size messages. It SHALL NOT impose a minimum terminal width, use fixed width breakpoints, or replace the active page with a terminal-too-small screen. As horizontal space contracts, it SHALL first omit optional header metadata and low-priority hints according to measured fit, then compress table columns to their shared minimums and expose horizontal overflow rather than remove declared columns solely because of terminal width. All dimensions SHALL be clamped to non-negative values, and child components SHALL NOT perform independent terminal-size arithmetic. Constrained layout SHALL preserve active page identity, navigation, overflow affordances, and the alert rail whenever the terminal has rows available for them.
 
-#### Scenario: Cross responsive boundaries
+#### Scenario: Continuously constrain and restore the terminal
 
 - GIVEN a populated table and an active persistent error
-- WHEN the terminal crosses the full, compact, terminal-too-small, and compact boundaries
-- THEN the shared layout SHALL deterministically choose the same mode at each boundary
-- AND the error summary SHALL remain on the bottom terminal row in every mode
-- AND returning to compact mode SHALL restore the page without corrupting selection or navigation state
+- WHEN the terminal width repeatedly shrinks below the bounded table width and later grows
+- THEN the shared layout SHALL continuously allocate non-negative component dimensions without a minimum-width replacement screen
+- AND columns beyond the available width SHALL remain reachable through horizontal scrolling
+- AND the error summary SHALL remain on the bottom terminal row
+- AND growing the terminal SHALL restore the page without corrupting selection or navigation state
 
 ### Requirement: Reusable Presentation Component Architecture
 
@@ -304,7 +305,7 @@ The header SHALL show refresh activity and the last successful refresh age. A pa
 
 ### Requirement: Presentation Component Conformance Gate
 
-The generated runtime SHALL have deterministic component tests for the full, compact, and terminal-too-small layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
+The generated runtime SHALL have deterministic component tests for spacious, constrained, and extremely narrow continuous layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover content-aware Unicode column measurement, minimum and maximum bounds, priority-based compression, horizontal offsets, overflow indicators and counts, every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, column-sizing policy, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
 
 #### Scenario: Prove one presentation system
 

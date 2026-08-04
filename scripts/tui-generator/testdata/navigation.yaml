@@ -84,10 +84,17 @@ paths:
     parameters:
       - {name: parent_id, in: path, required: true, schema: {type: string}}
       - {name: child_id, in: path, required: true, schema: {type: string}}
-      - {name: notify, in: query, required: true, style: form, allowReserved: true, schema: {type: boolean}}
+      - {name: notify, in: query, required: true, style: form, allowReserved: true, schema: {type: boolean, default: false}}
       - {name: X-Reason, in: header, required: true, style: simple, schema: {type: string}}
     post:
       operationId: archiveChild
+      x-trex-tui:
+        label: Archive child
+        hotkey: x
+        confirmation:
+          title: Confirm archive
+          message: Archive the selected child?
+          destructive: false
       responses: {"202": {description: archived}}
   /parents/{parent_id}/children/{child_id}/events:
     parameters:
@@ -147,7 +154,7 @@ components:
     ChildPatch:
       type: object
       required: [name]
-      properties: {name: {type: string}, server_value: {type: string, readOnly: true}}
+      properties: {name: {type: string, enum: [new, archived], default: new}, server_value: {type: string, readOnly: true}}
     Organization:
       type: object
       properties: {id: {type: string}}

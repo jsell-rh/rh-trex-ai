@@ -160,7 +160,7 @@ func TestStreamingIsIncrementalBoundedSanitizedAndCancelable(t *testing.T) {
 		t.Fatalf("stream state was not cleared: %#v", final)
 	}
 
-	bounded := &Model{detail: viewport.New(80, 20)}
+	bounded := &Model{DetailStreamComponent: DetailStreamComponent{detail: viewport.New(80, 20), autoscroll: true}}
 	for index := 0; index < maxVisibleStreamEvents+25; index++ {
 		bounded.appendStreamEvent(fmt.Sprintf("event-%03d", index))
 	}
@@ -229,8 +229,8 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 	waitForText(t, testModel, "header parameter X-Reason (string) — required")
 	testModel.Type("operator requested")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "JSON request body (application/json) — required")
-	testModel.Type(`{"name":"updated"}`)
+	waitForText(t, testModel, "body field name (string) — required")
+	testModel.Type("updated")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, testModel, "Operation completed")
 	select {
@@ -511,6 +511,209 @@ func TestPopRestoresCollectionSelectionByIdentity(t *testing.T) {
 	selected := model.selectedRow()
 	if selected == nil || selected.Identity != "parent-2" {
 		t.Fatalf("restored selection = %#v", selected)
+	}
+}
+
+func TestRefreshFailurePreservesContentAndLaterSuccessRestoresSelection(t *testing.T) {
+	fail := false
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests++
+		if fail {
+			http.Error(writer, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"items":[{"id":"one","name":"One"},{"id":"two","name":"Two"}]}`)
+	}))
+	defer server.Close()
+	descriptor := Descriptor{
+		Title: "Refresh test", Servers: []Server{{URL: server.URL}},
+		Views:      []View{{ID: "things", Kind: "collection", Label: "Things", IdentityProperty: "id", DefaultSort: "name", Columns: []Column{{Property: "name", Label: "NAME"}}, OperationIDs: []string{"listThings"}, ListOperationID: "listThings"}},
+		Operations: []Operation{{ID: "listThings", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/things"}}, Response: ResponseShape{ItemsPointer: "/items"}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}}},
+	}
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL, RefreshInterval: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := model.loadCurrent()
+	if initial == nil {
+		t.Fatal("initial load command is nil")
+	}
+	_, _ = model.handleResult(initial().(operationResultMsg))
+	model.table.SetCursor(1)
+	selected := model.selectedRow()
+	if selected == nil || selected.Identity != "two" {
+		t.Fatalf("initial selection = %#v", selected)
+	}
+
+	fail = true
+	refresh := model.refreshCurrent()
+	if refresh == nil || !model.frames[0].InFlight || !model.frames[0].Refreshing {
+		t.Fatalf("refresh did not enter in-flight state: %#v", model.frames[0])
+	}
+	if duplicate := model.refreshCurrent(); duplicate != nil {
+		t.Fatal("overlapping refresh command was created")
+	}
+	_, _ = model.handleResult(refresh().(operationResultMsg))
+	if len(model.rows) != 2 || !model.frames[0].Stale || model.frames[0].InFlight || model.frames[0].Refreshing {
+		t.Fatalf("failed refresh state = frame %#v, rows %d", model.frames[0], len(model.rows))
+	}
+	alert, present := model.shell.Alerts.Active()
+	if !present || alert.Severity != AlertError || !strings.Contains(alert.Summary, "HTTP 503") {
+		t.Fatalf("refresh alert = %#v, present %v", alert, present)
+	}
+
+	fail = false
+	refresh = model.refreshCurrent()
+	_, _ = model.handleResult(refresh().(operationResultMsg))
+	selected = model.selectedRow()
+	if selected == nil || selected.Identity != "two" || model.frames[0].Stale || model.frames[0].LastSuccess.IsZero() {
+		t.Fatalf("successful refresh state = frame %#v, selection %#v", model.frames[0], selected)
+	}
+	for _, candidate := range model.shell.Alerts.alerts {
+		if candidate.Key == model.refreshAlertKey(model.frames[0].ID) {
+			t.Fatalf("successful retry retained refresh error %#v", candidate)
+		}
+	}
+	if requests != 3 {
+		t.Fatalf("requests = %d, want initial plus two refreshes", requests)
+	}
+}
+
+func TestInvalidSuccessfulReadShapeDoesNotRecordRefreshSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"unexpected":[]}`)
+	}))
+	defer server.Close()
+	model, err := NewModel(runtimeTestDescriptor(server.URL), ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := model.loadCurrent()
+	_, _ = model.handleResult(request().(operationResultMsg))
+	if !model.frames[0].LoadFailed || !model.frames[0].LastSuccess.IsZero() {
+		t.Fatalf("invalid response shape recorded success: %#v", model.frames[0])
+	}
+	alert, present := model.shell.Alerts.Active()
+	if !present || alert.Severity != AlertError || !strings.Contains(alert.Summary, "items") {
+		t.Fatalf("invalid response alert = %#v, present %v", alert, present)
+	}
+}
+
+func TestPollingCanBeDisabledAndStalenessUsesConfiguredThreshold(t *testing.T) {
+	descriptor := runtimeTestDescriptor("http://localhost:8000")
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: "http://localhost:8000", RefreshInterval: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	model.frames[0].LastSuccess = now
+	model.nextRefresh = now
+	_, _ = model.Update(presentationPulseMsg{now: now.Add(20 * time.Second)})
+	if model.frames[0].InFlight {
+		t.Fatal("disabled polling started a request")
+	}
+	if !model.frames[0].Stale {
+		t.Fatal("page did not become stale after the fifteen-second floor")
+	}
+
+	model.refreshInterval = 10 * time.Second
+	model.frames[0].Stale = false
+	model.updateStaleness(now.Add(29 * time.Second))
+	if model.frames[0].Stale {
+		t.Fatal("page became stale before three configured intervals")
+	}
+	model.updateStaleness(now.Add(31 * time.Second))
+	if !model.frames[0].Stale {
+		t.Fatal("page did not become stale after three configured intervals")
+	}
+}
+
+func TestHiddenFrameResultIsIgnoredWithoutLeavingRequestStuck(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"items":[{"id":"one","name":"One"}]}`)
+	}))
+	defer server.Close()
+	descriptor := runtimeTestDescriptor(server.URL)
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := model.loadCurrent()
+	_, _ = model.handleResult(initial().(operationResultMsg))
+	refresh := model.refreshCurrent()
+	parentID := model.frames[0].ID
+	model.frames = append(model.frames, Frame{ID: model.newFrameID(), TargetViewID: "accounts", Label: "Accounts", Bindings: map[string]any{}})
+	before := len(model.rows)
+	_, _ = model.handleResult(refresh().(operationResultMsg))
+	if model.frames[0].InFlight || model.frames[0].Refreshing {
+		t.Fatalf("hidden frame %d remained in flight: %#v", parentID, model.frames[0])
+	}
+	if len(model.rows) != before {
+		t.Fatalf("hidden result changed active content: %d -> %d", before, len(model.rows))
+	}
+}
+
+func TestModelRejectsNegativeRefreshInterval(t *testing.T) {
+	_, err := NewModel(runtimeTestDescriptor("http://localhost:8000"), ClientConfig{BaseURL: "http://localhost:8000", RefreshInterval: -time.Second})
+	if err == nil || !strings.Contains(err.Error(), "non-negative") {
+		t.Fatalf("negative refresh interval error = %v", err)
+	}
+}
+
+func TestOperationHotkeyUsesSafeConfirmationAndSubmitsOnce(t *testing.T) {
+	actionRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodDelete {
+			actionRequests++
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"items":[]}`)
+	}))
+	defer server.Close()
+	descriptor := Descriptor{
+		Title: "Action confirmation", Servers: []Server{{URL: server.URL}},
+		Views: []View{{ID: "things", Kind: "collection", Label: "Things", OperationIDs: []string{"listThings", "deleteThings"}, ListOperationID: "listThings"}},
+		Operations: []Operation{
+			{ID: "listThings", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/things"}}, Response: ResponseShape{ItemsPointer: "/items"}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}},
+			{ID: "deleteThings", Method: http.MethodDelete, PathParts: []PathPart{{Literal: "/things"}}, SuccessStatuses: []string{"204"}, Capabilities: []string{"delete"}, Security: EffectiveSecurity{None: true}, Presentation: ActionPresentation{Label: "Delete all", Hotkey: "x", Confirmation: &Confirmation{Title: "Confirm delete", Message: "Delete all things?", Destructive: true}}},
+		},
+	}
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if command != nil || model.mode != modeConfirmation || model.confirmation == nil || model.confirmation.confirmFocus {
+		t.Fatalf("hotkey confirmation state = mode %v, dialog %#v, command %v", model.mode, model.confirmation, command)
+	}
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if command != nil || model.mode != modeBrowse || actionRequests != 0 {
+		t.Fatalf("safe cancel issued request: mode %v, command %v, requests %d", model.mode, command, actionRequests)
+	}
+
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil {
+		t.Fatal("explicit confirmation did not create request")
+	}
+	_, duplicate := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if duplicate != nil {
+		t.Fatal("repeated confirmation created a second request")
+	}
+	_, refresh := model.handleResult(command().(operationResultMsg))
+	if refresh == nil || actionRequests != 1 {
+		t.Fatalf("confirmed action = requests %d, refresh %v", actionRequests, refresh)
+	}
+	_, _ = model.handleResult(refresh().(operationResultMsg))
+	if actionRequests != 1 || model.mode != modeBrowse {
+		t.Fatalf("post-action state = requests %d, mode %v", actionRequests, model.mode)
 	}
 }
 

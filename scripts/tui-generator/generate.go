@@ -18,6 +18,7 @@ var (
 	modulePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~/-]*$`)
 	binaryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	aliasPattern  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	hotkeyPattern = regexp.MustCompile(`^(?:[a-z0-9]|ctrl-[a-z])$`)
 )
 
 const (

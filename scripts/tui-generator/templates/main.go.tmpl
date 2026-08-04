@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -32,6 +33,7 @@ func main() {
 	server := flag.String("server", defaultServer, "API server URL")
 	tokenFile := flag.String("token-file", "", "file containing a bearer token; use /dev/stdin to read standard input")
 	insecure := flag.Bool("insecure", false, "allow non-loopback HTTP or skip TLS verification")
+	refreshInterval := flag.Duration("refresh-interval", 5*time.Second, "polling interval; 0 disables polling")
 	var trusted stringList
 	flag.Var(&trusted, "trust-origin", "additional operation-server origin trusted to receive credentials (repeatable)")
 	flag.Parse()
@@ -44,7 +46,7 @@ func main() {
 		credential = strings.TrimSpace(string(data))
 	}
 	model, err := tui.NewModel(descriptor, tui.ClientConfig{
-		BaseURL: *server, Token: credential, Insecure: *insecure, TrustedOrigins: trusted,
+		BaseURL: *server, Token: credential, Insecure: *insecure, TrustedOrigins: trusted, RefreshInterval: *refreshInterval,
 	})
 	if err != nil {
 		exit(err)

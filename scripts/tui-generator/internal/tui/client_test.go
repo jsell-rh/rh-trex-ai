@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExactRequestAndSecurity(t *testing.T) {
@@ -136,6 +137,36 @@ func TestOptionalBearerSecurityAllowsAnonymousRequest(t *testing.T) {
 				t.Fatalf("authorization = %q, want %q", authorization, testCase.wantAuthorization)
 			}
 		})
+	}
+}
+
+func TestStreamDoesNotInheritFiniteRequestTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		flusher := writer.(http.Flusher)
+		_, _ = io.WriteString(writer, "first\n")
+		flusher.Flush()
+		time.Sleep(30 * time.Millisecond)
+		_, _ = io.WriteString(writer, "second\n")
+	}))
+	defer server.Close()
+	client, err := NewClient(Descriptor{Servers: []Server{{URL: server.URL}}}, ClientConfig{
+		BaseURL:    server.URL,
+		HTTPClient: &http.Client{Timeout: 10 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.OpenStream(context.Background(), Operation{
+		ID: "watch", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/watch"}},
+		SuccessStatuses: []string{"200"}, Security: EffectiveSecurity{None: true},
+	}, RequestInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	if err != nil || string(data) != "first\nsecond\n" {
+		t.Fatalf("stream body = %q, error %v", data, err)
 	}
 }
 

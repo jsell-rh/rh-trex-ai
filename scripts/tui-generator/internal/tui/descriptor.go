@@ -62,17 +62,31 @@ type Source struct {
 }
 
 type Operation struct {
-	ID              string            `json:"id"`
-	Method          string            `json:"method"`
-	PathParts       []PathPart        `json:"pathParts"`
-	Parameters      []Parameter       `json:"parameters,omitempty"`
-	RequestBody     *RequestBody      `json:"requestBody,omitempty"`
-	Response        ResponseShape     `json:"response"`
-	SuccessStatuses []string          `json:"successStatuses"`
-	Servers         []Server          `json:"servers,omitempty"`
-	Security        EffectiveSecurity `json:"security"`
-	Capabilities    []string          `json:"capabilities,omitempty"`
-	Summary         string            `json:"summary,omitempty"`
+	ID              string             `json:"id"`
+	Method          string             `json:"method"`
+	PathParts       []PathPart         `json:"pathParts"`
+	Parameters      []Parameter        `json:"parameters,omitempty"`
+	RequestBody     *RequestBody       `json:"requestBody,omitempty"`
+	Response        ResponseShape      `json:"response"`
+	SuccessStatuses []string           `json:"successStatuses"`
+	Servers         []Server           `json:"servers,omitempty"`
+	Security        EffectiveSecurity  `json:"security"`
+	Capabilities    []string           `json:"capabilities,omitempty"`
+	Summary         string             `json:"summary,omitempty"`
+	Presentation    ActionPresentation `json:"presentation,omitempty"`
+	Source          Source             `json:"-"`
+}
+
+type ActionPresentation struct {
+	Label        string        `json:"label,omitempty"`
+	Hotkey       string        `json:"hotkey,omitempty"`
+	Confirmation *Confirmation `json:"confirmation,omitempty"`
+}
+
+type Confirmation struct {
+	Title       string `json:"title"`
+	Message     string `json:"message"`
+	Destructive bool   `json:"destructive"`
 }
 
 type PathPart struct {
@@ -90,6 +104,9 @@ type Parameter struct {
 	Type          string `json:"type,omitempty"`
 	Format        string `json:"format,omitempty"`
 	Pattern       string `json:"pattern,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Enum          []any  `json:"enum,omitempty"`
+	Default       any    `json:"default,omitempty"`
 }
 
 type RequestBody struct {
@@ -99,12 +116,15 @@ type RequestBody struct {
 }
 
 type InputField struct {
-	Name      string `json:"name"`
-	Type      string `json:"type,omitempty"`
-	Format    string `json:"format,omitempty"`
-	Required  bool   `json:"required"`
-	ReadOnly  bool   `json:"readOnly,omitempty"`
-	WriteOnly bool   `json:"writeOnly,omitempty"`
+	Name        string `json:"name"`
+	Type        string `json:"type,omitempty"`
+	Format      string `json:"format,omitempty"`
+	Required    bool   `json:"required"`
+	ReadOnly    bool   `json:"readOnly,omitempty"`
+	WriteOnly   bool   `json:"writeOnly,omitempty"`
+	Description string `json:"description,omitempty"`
+	Enum        []any  `json:"enum,omitempty"`
+	Default     any    `json:"default,omitempty"`
 }
 
 type ResponseShape struct {

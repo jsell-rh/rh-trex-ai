@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -84,12 +85,61 @@ func TestNavigationProjectionGraphConformance(t *testing.T) {
 	if patch.RequestBody == nil || !patch.RequestBody.Required || len(patch.RequestBody.Fields) != 1 || patch.RequestBody.Fields[0].Name != "name" {
 		t.Fatalf("request fields did not exclude read-only values: %#v", patch.RequestBody)
 	}
+	if !reflect.DeepEqual(patch.RequestBody.Fields[0].Enum, []any{"new", "archived"}) || patch.RequestBody.Fields[0].Default != "new" {
+		t.Fatalf("request field choices/default = %#v", patch.RequestBody.Fields[0])
+	}
 	archive := operationByID(t, descriptor, "archiveChild")
 	if gap := requiredProjectionInputs(*archive); !reflect.DeepEqual(gap, []string{"header:X-Reason", "query:notify"}) {
 		t.Fatalf("action required inputs = %#v", gap)
 	}
 	if parameter := operationParameter(archive, "notify"); parameter == nil || parameter.Style != "form" || !parameter.Explode || !parameter.AllowReserved {
 		t.Fatalf("query serialization metadata was not preserved: %#v", parameter)
+	} else if parameter.Default != false {
+		t.Fatalf("query default was not preserved: %#v", parameter)
+	}
+	if archive.Presentation.Label != "Archive child" || archive.Presentation.Hotkey != "x" || archive.Presentation.Confirmation == nil || archive.Presentation.Confirmation.Title != "Confirm archive" || archive.Presentation.Confirmation.Destructive {
+		t.Fatalf("action presentation metadata = %#v", archive.Presentation)
+	}
+}
+
+func TestDeleteActionAlwaysProjectsDestructiveConfirmation(t *testing.T) {
+	document, err := ir.Load("testdata/navigation.yaml", ir.LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range document.Operations {
+		if operation.ID == "archiveChild" {
+			operation.Method = http.MethodDelete
+			delete(operation.Extensions, tuiExtension)
+		}
+	}
+	descriptor, err := projectDocument(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := operationByID(t, descriptor, "archiveChild")
+	if archive.Presentation.Confirmation == nil || !archive.Presentation.Confirmation.Destructive || archive.Presentation.Confirmation.Title == "" || archive.Presentation.Confirmation.Message == "" {
+		t.Fatalf("delete confirmation = %#v", archive.Presentation.Confirmation)
+	}
+}
+
+func TestConflictingActionHotkeysReportBothOperations(t *testing.T) {
+	original, err := os.ReadFile("testdata/navigation.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := strings.Replace(string(original), "      operationId: patchChild", "      operationId: patchChild\n      x-trex-tui: {hotkey: x}", 1)
+	path := filepath.Join(t.TempDir(), "conflict.yaml")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	document, err := ir.Load(path, ir.LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = projectDocument(document)
+	if err == nil || !strings.Contains(err.Error(), "archiveChild") || !strings.Contains(err.Error(), "patchChild") || !strings.Contains(err.Error(), "hotkey \"x\" conflicts") || !strings.Contains(err.Error(), path+"#/") {
+		t.Fatalf("hotkey conflict diagnostic = %v", err)
 	}
 }
 
@@ -210,7 +260,10 @@ func TestInvalidPresentationExtensionsFailBeforeWriting(t *testing.T) {
 		{name: "invalid alias", old: "        aliases: [pa]", replacement: "        aliases: [Bad]", want: `alias "Bad" is invalid`},
 		{name: "missing sort property", old: "        default-sort: name", replacement: "        default-sort: missing", want: `default-sort "missing" is not a readable scalar property`},
 		{name: "terminal control label", old: "        label: Parents", replacement: "        label: \"bad\\u001b[31m\"", want: "terminal-safe string"},
-		{name: "reserved action metadata", old: "      operationId: archiveChild", replacement: "      operationId: archiveChild\n      x-trex-tui: {hotkey: x}", want: `reserved x-trex-tui field "hotkey" is not supported`},
+		{name: "unsupported action visibility", old: "        hotkey: x", replacement: "        hotkey: x\n        visibility: hidden", want: `x-trex-tui field "visibility" is unsupported`},
+		{name: "local action hotkey", old: "        hotkey: x", replacement: "        hotkey: a", want: `hotkey "a" conflicts with the shared keybinding registry`},
+		{name: "global control hotkey", old: "        hotkey: x", replacement: "        hotkey: ctrl-c", want: `hotkey "ctrl-c" conflicts with the shared keybinding registry`},
+		{name: "unsafe confirmation", old: "          message: Archive the selected child?", replacement: "          message: \"bad\\u001b[31m\"", want: "message must be a non-empty terminal-safe string"},
 		{name: "incomplete explicit binding", old: "            children:\n              operationId: listChildren\n              parameters: {parent_id: \"$response.body#/id\"}", replacement: "            children:\n              operationId: listAmbiguousChildren", want: "unsatisfied path parameters: organization_id, project_id"},
 	}
 	for _, testCase := range tests {

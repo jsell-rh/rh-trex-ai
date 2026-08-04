@@ -9,13 +9,12 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"unicode/utf8"
+	"time"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type Row struct {
@@ -25,6 +24,7 @@ type Row struct {
 }
 
 type Frame struct {
+	ID               uint64
 	EdgeID           string
 	SourceViewID     string
 	SelectedIdentity string
@@ -40,6 +40,13 @@ type Frame struct {
 	ResponseHeaders  http.Header
 	ResponseBody     any
 	ResponseStatus   int
+	LastSuccess      time.Time
+	RefreshIdentity  string
+	InFlight         bool
+	Refreshing       bool
+	Stale            bool
+	Forbidden        bool
+	LoadFailed       bool
 }
 
 type mode int
@@ -51,7 +58,10 @@ const (
 	modeRelationships
 	modeActions
 	modeActionInput
+	modeConfirmation
 	modeDetail
+	modeHelp
+	modeAlertDetails
 )
 
 const (
@@ -60,62 +70,58 @@ const (
 	maxActionInputBytes    = 64 << 10
 )
 
-type actionPrompt struct {
-	Parameter *Parameter
-	Body      bool
-}
-
 type Model struct {
-	descriptor       Descriptor
-	client           *Client
-	frames           []Frame
-	rows             []Row
-	visible          []Row
-	displayColumns   []int
-	columnWidths     []int
-	leftOverflow     int
-	rightOverflow    int
-	table            table.Model
+	descriptor Descriptor
+	client     *Client
+	frames     []Frame
+	ResourceTableComponent
+	DetailStreamComponent
+	CommandBar
 	chooser          table.Model
-	input            textinput.Model
-	detail           viewport.Model
 	mode             mode
-	filter           string
-	restoreIdentity  string
-	status           string
+	previousMode     mode
 	width            int
 	height           int
 	loading          bool
 	chosenEdges      []Edge
 	chosenOperations []Operation
 	actionOperation  Operation
-	actionPrompts    []actionPrompt
-	actionPrompt     int
 	actionRequest    RequestInput
-	streamCancel     context.CancelFunc
-	streamEvents     <-chan streamEvent
-	streamLines      []string
-	streamBytes      int
+	form             *FormDialog
+	confirmation     *ConfirmationDialog
+	actionInFlight   bool
+	postAction       bool
+	shell            Shell
+	refreshInterval  time.Duration
+	nextRefresh      time.Time
+	nextFrameID      uint64
+	now              func() time.Time
 }
 
 type operationResultMsg struct {
 	viewID      string
+	frameID     uint64
 	operationID string
 	input       RequestInput
 	result      Result
 	err         error
+	background  bool
 }
 
+type presentationPulseMsg struct{ now time.Time }
+
 type streamOpenedMsg struct {
-	viewID string
-	events <-chan streamEvent
-	err    error
+	viewID  string
+	frameID uint64
+	events  <-chan streamEvent
+	err     error
 }
 
 type streamEventMsg struct {
-	viewID string
-	events <-chan streamEvent
-	event  streamEvent
+	viewID  string
+	frameID uint64
+	events  <-chan streamEvent
+	event   streamEvent
 }
 
 type streamEvent struct {
@@ -125,6 +131,9 @@ type streamEvent struct {
 }
 
 func NewModel(descriptor Descriptor, config ClientConfig) (*Model, error) {
+	if config.RefreshInterval < 0 {
+		return nil, fmt.Errorf("refresh interval must be non-negative")
+	}
 	client, err := NewClient(descriptor, config)
 	if err != nil {
 		return nil, err
@@ -133,20 +142,23 @@ func NewModel(descriptor Descriptor, config ClientConfig) (*Model, error) {
 	if root == nil {
 		return nil, fmt.Errorf("descriptor has no globally addressable list view")
 	}
-	input := textinput.New()
-	input.CharLimit = 256
 	detail := viewport.New(80, 20)
 	model := &Model{
-		descriptor: descriptor, client: client, input: input, detail: detail,
+		descriptor: descriptor, client: client, CommandBar: NewCommandBar(), DetailStreamComponent: DetailStreamComponent{detail: detail, autoscroll: true},
 		width: 100, height: 30,
-		frames: []Frame{{TargetViewID: root.ID, Label: root.Label, Bindings: map[string]any{}}},
+		frames:          []Frame{{ID: 1, TargetViewID: root.ID, Label: root.Label, Bindings: map[string]any{}}},
+		shell:           NewShell(config.Token),
+		refreshInterval: config.RefreshInterval, nextFrameID: 1, now: time.Now,
+	}
+	if config.RefreshInterval > 0 {
+		model.nextRefresh = model.now().Add(config.RefreshInterval)
 	}
 	model.rebuildTable(*root)
 	return model, nil
 }
 
 func (model *Model) Init() tea.Cmd {
-	return model.loadCurrent()
+	return tea.Batch(model.loadCurrent(), presentationPulse())
 }
 
 func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -157,40 +169,64 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return model, nil
 	case operationResultMsg:
 		return model.handleResult(typed)
+	case presentationPulseMsg:
+		model.shell.Alerts.Expire()
+		model.updateStaleness(typed.now)
+		var refresh tea.Cmd
+		if model.refreshInterval > 0 && !typed.now.Before(model.nextRefresh) {
+			model.nextRefresh = typed.now.Add(model.refreshInterval)
+			refresh = model.refreshCurrent()
+		}
+		return model, tea.Batch(refresh, presentationPulse())
 	case streamOpenedMsg:
-		if model.currentView() == nil || typed.viewID != model.currentView().ID {
+		if model.currentView() == nil || len(model.frames) == 0 || typed.viewID != model.currentView().ID || typed.frameID != model.frames[len(model.frames)-1].ID {
+			model.clearFrameRequest(typed.frameID)
 			return model, nil
 		}
 		model.loading = false
+		model.frames[len(model.frames)-1].InFlight = false
 		if typed.err != nil {
-			model.status = SanitizeCell(typed.err.Error())
+			frame := &model.frames[len(model.frames)-1]
+			frame.LoadFailed = true
+			frame.Stale = !frame.LastSuccess.IsZero()
+			model.alertError("stream", typed.err.Error())
 			return model, nil
 		}
 		model.streamEvents = typed.events
 		model.streamLines = nil
 		model.streamBytes = 0
+		model.connected = true
+		model.autoscroll = true
 		model.detail.SetContent("")
 		model.mode = modeDetail
-		model.status = "Stream connected"
-		return model, waitStreamEvent(typed.viewID, typed.events)
+		model.alertSuccess("stream-state", "Stream connected")
+		frame := &model.frames[len(model.frames)-1]
+		frame.LastSuccess = model.currentTime()
+		frame.Stale = false
+		return model, waitStreamEvent(typed.viewID, typed.frameID, typed.events)
 	case streamEventMsg:
-		if typed.events != model.streamEvents || model.currentView() == nil || typed.viewID != model.currentView().ID {
+		if typed.events != model.streamEvents || model.currentView() == nil || len(model.frames) == 0 || typed.viewID != model.currentView().ID || typed.frameID != model.frames[len(model.frames)-1].ID {
 			return model, nil
 		}
 		if typed.event.err != nil {
-			model.status = SanitizeCell(typed.event.err.Error())
+			frame := &model.frames[len(model.frames)-1]
+			frame.LoadFailed = true
+			frame.Stale = !frame.LastSuccess.IsZero()
+			model.alertError("stream", typed.event.err.Error())
 			model.streamEvents = nil
 			model.streamCancel = nil
+			model.connected = false
 			return model, nil
 		}
 		if typed.event.done {
-			model.status = "Stream closed"
+			model.alertInfo("stream-state", "Stream closed")
 			model.streamEvents = nil
 			model.streamCancel = nil
+			model.connected = false
 			return model, nil
 		}
 		model.appendStreamEvent(typed.event.text)
-		return model, waitStreamEvent(typed.viewID, typed.events)
+		return model, waitStreamEvent(typed.viewID, typed.frameID, typed.events)
 	case tea.KeyMsg:
 		return model.handleKey(typed)
 	}
@@ -208,58 +244,227 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (model *Model) View() string {
+	model.ensurePresentation()
 	view := model.currentView()
 	if view == nil {
-		return "No view\n"
+		return model.shell.Render(ShellView{Page: SemanticPage{PageTitle: "Unavailable", PageState: PageFatal, PageContent: "No view"}}, model.width, model.height)
 	}
-	var body string
+	page := model.semanticPage(*view)
+	command := ""
 	switch model.mode {
 	case modeFilter:
-		body = model.tableView() + "\n/" + model.input.View()
+		command = model.CommandBar.View("/")
 	case modeSwitch:
-		body = model.tableView() + "\n:" + model.input.View()
+		command = model.CommandBar.View(":")
 	case modeRelationships, modeActions:
-		body = model.chooser.View()
+		title := "Relationships"
+		if model.mode == modeActions {
+			title = "Actions"
+		}
+		model.shell.Modal.Open(StaticDialog{DialogKind: DialogChoice, DialogTitle: title, DialogContent: model.chooser.View(), DialogFooter: model.shell.Keys.Hints(KeySubmit, KeyCancel)})
 	case modeActionInput:
-		body = model.actionInputView()
-	case modeDetail:
-		body = model.detail.View()
+		if model.form != nil {
+			model.shell.Modal.Open(model.form)
+		}
+	case modeConfirmation:
+		if model.confirmation != nil {
+			model.shell.Modal.Open(model.confirmation)
+		}
+	case modeHelp:
+		model.shell.Modal.Open(StaticDialog{DialogKind: DialogHelp, DialogTitle: "Help", DialogContent: model.helpContent(*view), DialogFooter: model.shell.Keys.Hints(KeyCancel)})
+	case modeAlertDetails:
+		if alert, present := model.shell.Alerts.Active(); present {
+			details := alert.Details
+			if details == "" {
+				details = alert.Summary
+			}
+			model.shell.Modal.Open(StaticDialog{DialogKind: DialogHelp, DialogTitle: alertPrefix(alert.Severity) + " details", DialogContent: details, DialogFooter: model.shell.Keys.Hints(KeyCancel, KeyDismissAlert)})
+		}
 	default:
-		body = model.tableView()
+		model.shell.Modal.Close()
 	}
-	header := lipgloss.NewStyle().Bold(true).Render(SanitizeCell(model.descriptor.Title) + " — " + SanitizeCell(view.Label))
-	status := SanitizeCell(model.status)
-	if model.loading {
-		status = "Loading…"
+	presentation := model.shellView(*view, page, command)
+	return model.shell.Render(presentation, model.width, model.height)
+}
+
+func (model *Model) shellView(view View, page Page, command string) ShellView {
+	headerActions := model.localActions(view)
+	if command != "" || model.shell.Modal.Active() {
+		headerActions = nil
 	}
-	hints := "[:] resources  [/] filter  [Enter] navigate  [d] detail  [a] actions  [Esc] back  [q] quit"
-	return header + "\n" + SanitizeCell(model.breadcrumb()) + "\n" + body + "\n" + hints + "\n" + status + "\n"
+	return ShellView{
+		Header: HeaderModel{
+			Service: model.descriptor.Title, Page: view.Label, Origin: model.serverOrigin(),
+			Authenticated: model.authenticated(), Scope: model.scope(), Refreshing: model.currentRefreshing(),
+			LastSuccess: model.currentLastSuccess(), Now: model.currentTime(), Actions: headerActions,
+		},
+		Page: page, Command: command, Breadcrumb: model.breadcrumb(), HintIDs: model.applicableKeys(),
+	}
+}
+
+func (model *Model) semanticPage(view View) Page {
+	state := PageReady
+	frame := &model.frames[len(model.frames)-1]
+	if frame.Forbidden {
+		state = PageForbidden
+	} else if frame.LoadFailed && len(model.rows) == 0 && frame.Selected == nil {
+		state = PageFatal
+	} else if frame.Stale {
+		state = PageStale
+	} else if model.loading && len(model.rows) == 0 && frame.Selected == nil {
+		state = PageLoading
+	}
+	if model.mode == modeDetail {
+		return DetailPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.detail.View(), PageActions: model.localActions(view)}}
+	}
+	if view.Kind == "stream" {
+		return StreamPage{SemanticPage{PageTitle: view.Label, PageScope: model.scope(), PageState: state, PageContent: model.StreamContent(), PageActions: model.localActions(view)}}
+	}
+	count := len(model.visible)
+	if state == PageReady && !model.loading && count == 0 {
+		state = PageEmpty
+	}
+	return ResourceTablePage{SemanticPage{PageTitle: view.Label, PageScope: model.tableScope(), PageCount: &count, PageState: state, PageContent: model.tableView(), PageActions: model.localActions(view)}}
+}
+
+func (model *Model) applicableKeys() []BindingID {
+	activeMode := model.mode
+	if activeMode == modeHelp || activeMode == modeAlertDetails {
+		activeMode = model.previousMode
+	}
+	var keys []BindingID
+	switch activeMode {
+	case modeFilter, modeSwitch:
+		keys = []BindingID{KeySubmit, KeyCancel, KeyHistoryPrevious, KeyHistoryNext, KeyHelp, KeyForceQuit}
+		if activeMode == modeSwitch {
+			keys = append(keys, KeyNextFocus)
+		}
+	case modeRelationships, modeActions:
+		keys = []BindingID{KeySubmit, KeyCancel, KeyHelp, KeyForceQuit}
+	case modeActionInput:
+		keys = []BindingID{KeyNextFocus, KeyPreviousFocus, KeyChoicePrevious, KeyChoiceNext, KeySubmit, KeyCancel, KeyHelp, KeyForceQuit}
+	case modeConfirmation:
+		keys = []BindingID{KeyNextFocus, KeySubmit, KeyCancel, KeyHelp, KeyForceQuit}
+	case modeDetail:
+		keys = []BindingID{KeyNavigate, KeyCancel, KeyHelp, KeyQuit}
+	default:
+		keys = []BindingID{KeyCommand, KeyFilter, KeyNavigate, KeyDetail, KeyActions, KeySortNext, KeySortDirection, KeyCancel, KeyHelp, KeyQuit}
+	}
+	if _, present := model.shell.Alerts.Active(); present {
+		keys = append(keys, KeyAlertDetails, KeyDismissAlert)
+	}
+	if model.leftOverflow > 0 {
+		keys = append(keys, KeyColumnsLeft)
+	}
+	if model.rightOverflow > 0 {
+		keys = append(keys, KeyColumnsRight)
+	}
+	if view := model.currentView(); view != nil && view.Kind == "stream" {
+		keys = append(keys, KeyToggleAutoscroll)
+	}
+	return keys
+}
+
+func (model *Model) helpContent(view View) string {
+	content := model.shell.Keys.Help(model.applicableKeys()...)
+	if actionHints := model.shell.Keys.ActionHints(model.localActions(view)); actionHints != "" {
+		if content != "" {
+			content += "\n"
+		}
+		content += actionHints
+	}
+	return content
+}
+
+func (model *Model) localActions(view View) []LocalAction {
+	var result []LocalAction
+	for _, id := range view.OperationIDs {
+		operation := model.descriptor.Operation(id)
+		if operation == nil || operation.Presentation.Hotkey == "" {
+			continue
+		}
+		result = append(result, LocalAction{Label: actionLabel(*operation), Hotkey: operation.Presentation.Hotkey})
+	}
+	return result
+}
+
+func (model *Model) scope() string {
+	if len(model.frames) == 0 {
+		return ""
+	}
+	bindings := model.frames[len(model.frames)-1].Bindings
+	keys := sortedAnyKeys(bindings)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+SanitizeCell(scalarString(bindings[key])))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (model *Model) tableScope() string {
+	parts := make([]string, 0, 2)
+	if scope := model.scope(); scope != "" {
+		parts = append(parts, scope)
+	}
+	if model.filter != "" {
+		parts = append(parts, `filter="`+SanitizeCell(model.filter)+`"`)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (model *Model) tableView() string {
-	view := model.table.View()
-	if overflow := renderColumnOverflow(model.leftOverflow, model.rightOverflow); overflow != "" {
-		view += "\n" + overflow
-	}
-	return view
+	return model.ResourceTableComponent.View()
 }
 
 func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.String() == "ctrl+c" || (key.String() == "q" && model.mode == modeBrowse) {
+	model.ensurePresentation()
+	if model.shell.Keys.Matches(key, KeyForceQuit) || (model.shell.Keys.Matches(key, KeyQuit) && (model.mode == modeBrowse || model.mode == modeDetail)) {
 		model.cancelStream()
 		return model, tea.Quit
+	}
+	if model.mode == modeHelp || model.mode == modeAlertDetails {
+		if model.mode == modeAlertDetails && model.shell.Keys.Matches(key, KeyDismissAlert) {
+			model.shell.Alerts.Dismiss()
+			model.mode = model.previousMode
+			model.shell.Modal.Close()
+			return model, nil
+		}
+		if model.shell.Keys.Matches(key, KeyCancel) || model.shell.Keys.Matches(key, KeyHelp) {
+			model.mode = model.previousMode
+			model.shell.Modal.Close()
+		}
+		return model, nil
+	}
+	if model.shell.Keys.Matches(key, KeyHelp) {
+		model.previousMode = model.mode
+		model.mode = modeHelp
+		return model, nil
+	}
+	if model.shell.Keys.Matches(key, KeyAlertDetails) {
+		if _, present := model.shell.Alerts.Active(); present {
+			model.previousMode = model.mode
+			model.mode = modeAlertDetails
+		}
+		return model, nil
+	}
+	if model.shell.Keys.Matches(key, KeyDismissAlert) {
+		model.shell.Alerts.Dismiss()
+		return model, nil
 	}
 	if model.mode == modeFilter || model.mode == modeSwitch {
 		return model.handleInputKey(key)
 	}
 	if model.mode == modeActionInput {
-		return model.handleActionInputKey(key)
+		return model.handleFormKey(key)
+	}
+	if model.mode == modeConfirmation {
+		return model.handleConfirmationKey(key)
 	}
 	if model.mode == modeRelationships || model.mode == modeActions {
 		return model.handleChooserKey(key)
 	}
 	if model.mode == modeDetail {
-		if key.String() == "esc" {
+		if model.shell.Keys.Matches(key, KeyCancel) {
 			view := model.currentView()
 			wasStreaming := model.streamEvents != nil || model.streamCancel != nil
 			model.cancelStream()
@@ -269,8 +474,15 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			model.mode = modeBrowse
 			return model, nil
 		}
-		if key.String() == "enter" {
+		if model.shell.Keys.Matches(key, KeyNavigate) {
 			return model.followRelationships()
+		}
+		if view := model.currentView(); view != nil && view.Kind == "stream" && model.shell.Keys.Matches(key, KeyToggleAutoscroll) {
+			model.autoscroll = !model.autoscroll
+			if model.autoscroll {
+				model.detail.GotoBottom()
+			}
+			return model, nil
 		}
 		var command tea.Cmd
 		model.detail, command = model.detail.Update(key)
@@ -280,39 +492,52 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		model.scrollColumns(direction)
 		return model, nil
 	}
-	switch key.String() {
-	case "/":
+	switch {
+	case model.shell.Keys.Matches(key, KeyFilter):
 		model.mode = modeFilter
-		model.input.CharLimit = 256
-		model.input.SetValue(model.filter)
-		model.input.Focus()
-		return model, textinput.Blink
-	case ":":
+		return model, model.CommandBar.Begin(CommandFilter, model.filter)
+	case model.shell.Keys.Matches(key, KeyCommand):
 		model.mode = modeSwitch
-		model.input.CharLimit = 256
-		model.input.SetValue("")
-		model.input.Focus()
-		return model, textinput.Blink
-	case "esc":
+		return model, model.CommandBar.Begin(CommandResource, "")
+	case model.shell.Keys.Matches(key, KeyCancel):
 		if model.filter != "" {
 			model.filter = ""
 			model.applyFilter()
 			return model, nil
 		}
 		return model.popFrame()
-	case "enter":
+	case model.shell.Keys.Matches(key, KeyNavigate):
 		return model.followRelationships()
-	case "d":
+	case model.shell.Keys.Matches(key, KeyDetail):
 		row := model.selectedRow()
 		if row == nil {
-			model.status = "No selected item"
+			model.alertWarning("selection", "No selected item")
 			return model, nil
 		}
 		model.detail.SetContent(renderDetail(row.Raw))
 		model.mode = modeDetail
 		return model, nil
-	case "a":
+	case model.shell.Keys.Matches(key, KeyActions):
 		return model.openActions()
+	case model.shell.Keys.Matches(key, KeySortNext):
+		if view := model.currentView(); view != nil {
+			model.ResourceTableComponent.CycleSort(*view)
+			model.configureTableColumns(*view)
+			model.applyFilter()
+		}
+		return model, nil
+	case model.shell.Keys.Matches(key, KeySortDirection):
+		model.ResourceTableComponent.ReverseSort()
+		if view := model.currentView(); view != nil {
+			model.configureTableColumns(*view)
+			model.applyFilter()
+		}
+		return model, nil
+	}
+	for _, operation := range model.operationsForCurrentView() {
+		if model.shell.Keys.ActionMatches(key, operation) {
+			return model.beginAction(operation)
+		}
 	}
 	var command tea.Cmd
 	model.table, command = model.table.Update(key)
@@ -320,14 +545,27 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (model *Model) handleInputKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.String() == "esc" {
+	if model.shell.Keys.Matches(key, KeyCancel) {
 		model.mode = modeBrowse
-		model.input.Blur()
+		model.CommandBar.Close()
 		return model, nil
 	}
-	if key.String() == "enter" {
-		value := strings.TrimSpace(model.input.Value())
-		model.input.Blur()
+	if model.shell.Keys.Matches(key, KeyHistoryPrevious) {
+		model.CommandBar.MoveHistory(-1)
+		return model, nil
+	}
+	if model.shell.Keys.Matches(key, KeyHistoryNext) {
+		model.CommandBar.MoveHistory(1)
+		return model, nil
+	}
+	if model.mode == modeSwitch && model.shell.Keys.Matches(key, KeyNextFocus) {
+		model.completeResourceCommand()
+		return model, nil
+	}
+	if model.shell.Keys.Matches(key, KeySubmit) {
+		value := strings.TrimSpace(model.CommandBar.Value())
+		model.CommandBar.Remember(value)
+		model.CommandBar.Close()
 		if model.mode == modeFilter {
 			model.filter = value
 			model.applyFilter()
@@ -336,31 +574,31 @@ func (model *Model) handleInputKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		view := model.addressableView(value)
 		if view == nil {
-			model.status = "Unknown or unavailable resource: " + SanitizeCell(value)
+			model.alertError("command", "Unknown or unavailable resource: "+value)
 			model.mode = modeBrowse
 			return model, nil
 		}
 		bindings := availableBindings(model.frames)
-		model.frames = []Frame{{TargetViewID: view.ID, Label: view.Label, Bindings: bindings}}
+		model.frames = []Frame{{ID: model.newFrameID(), TargetViewID: view.ID, Label: view.Label, Bindings: bindings}}
 		model.mode = modeBrowse
 		model.rebuildTable(*view)
 		return model, model.loadCurrent()
 	}
-	var command tea.Cmd
-	model.input, command = model.input.Update(key)
+	command := model.CommandBar.Update(key)
 	if model.mode == modeFilter {
-		model.filter = model.input.Value()
+		model.filter = model.CommandBar.Value()
 		model.applyFilter()
 	}
 	return model, command
 }
 
 func (model *Model) handleChooserKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.String() == "esc" {
+	if model.shell.Keys.Matches(key, KeyCancel) {
 		model.mode = modeBrowse
+		model.shell.Modal.Close()
 		return model, nil
 	}
-	if key.String() == "enter" {
+	if model.shell.Keys.Matches(key, KeySubmit) {
 		index := model.chooser.Cursor()
 		if model.mode == modeRelationships && index < len(model.chosenEdges) {
 			edge := model.chosenEdges[index]
@@ -412,20 +650,21 @@ func (model *Model) followRelationships() (tea.Model, tea.Cmd) {
 func (model *Model) pushEdge(edge Edge) (tea.Model, tea.Cmd) {
 	row := model.selectedRow()
 	if row == nil {
-		model.status = "Relationship requires a selected item"
+		model.alertWarning("selection", "Relationship requires a selected item")
 		return model, nil
 	}
 	bindings, err := evaluateBindings(edge, model.frames[len(model.frames)-1], *row)
 	if err != nil {
-		model.status = err.Error()
+		model.alertError("relationship", err.Error())
 		return model, nil
 	}
 	target := model.descriptor.View(edge.TargetViewID)
 	if target == nil {
-		model.status = "Relationship target is unavailable"
+		model.alertError("relationship", "Relationship target is unavailable")
 		return model, nil
 	}
 	frame := Frame{
+		ID:     model.newFrameID(),
 		EdgeID: edge.ID, SourceViewID: edge.SourceViewID, SelectedIdentity: row.Identity,
 		Bindings: bindings, TargetViewID: target.ID, Label: target.Label, Selected: row,
 	}
@@ -456,16 +695,9 @@ func (model *Model) openActions() (tea.Model, tea.Cmd) {
 	if view == nil {
 		return model, nil
 	}
-	var operations []Operation
-	for _, id := range view.OperationIDs {
-		operation := model.descriptor.Operation(id)
-		if operation == nil || containsString(operation.Capabilities, "list") || containsString(operation.Capabilities, "get") {
-			continue
-		}
-		operations = append(operations, *operation)
-	}
+	operations := model.operationsForCurrentView()
 	if len(operations) == 0 {
-		model.status = "No documented actions for this view"
+		model.alertInfo("actions", "No documented actions for this view")
 		return model, nil
 	}
 	sort.Slice(operations, func(i, j int) bool { return operations[i].ID < operations[j].ID })
@@ -473,10 +705,7 @@ func (model *Model) openActions() (tea.Model, tea.Cmd) {
 	rows := make([]table.Row, 0, len(operations))
 	values := cloneBindings(model.frames[len(model.frames)-1].Bindings)
 	for _, operation := range operations {
-		label := operation.Summary
-		if label == "" {
-			label = operation.ID
-		}
+		label := actionLabel(operation)
 		state := operation.Method
 		if count := actionInputCount(operation, values); count > 0 {
 			state += fmt.Sprintf(" · %d input(s)", count)
@@ -489,6 +718,10 @@ func (model *Model) openActions() (tea.Model, tea.Cmd) {
 }
 
 func (model *Model) beginAction(operation Operation) (tea.Model, tea.Cmd) {
+	if len(model.frames) > 0 && model.frames[len(model.frames)-1].InFlight {
+		model.alertWarning("action", "Wait for the current request to finish")
+		return model, nil
+	}
 	values := cloneBindings(model.frames[len(model.frames)-1].Bindings)
 	for _, parameter := range operation.Parameters {
 		if parameter.In != "path" {
@@ -500,105 +733,71 @@ func (model *Model) beginAction(operation Operation) (tea.Model, tea.Cmd) {
 	}
 	model.actionOperation = operation
 	model.actionRequest = RequestInput{Values: values}
-	model.actionPrompts = nil
-	model.actionPrompt = 0
-	for index := range operation.Parameters {
-		parameter := &operation.Parameters[index]
-		if value, present := operationParameterValue(operation, *parameter, values); present && strings.TrimSpace(scalarString(value)) != "" {
-			continue
-		}
-		model.actionPrompts = append(model.actionPrompts, actionPrompt{Parameter: parameter})
-	}
-	if operation.RequestBody != nil {
-		model.actionPrompts = append(model.actionPrompts, actionPrompt{Body: true})
-	}
-	if len(model.actionPrompts) == 0 {
-		model.mode = modeBrowse
-		return model, model.executeAction(operation, model.actionRequest)
+	model.actionInFlight = false
+	model.form = NewFormDialog(operation, values, model.shell.Keys)
+	if len(model.form.fields) == 0 {
+		return model.prepareActionSubmission(model.actionRequest)
 	}
 	model.mode = modeActionInput
-	model.status = ""
-	model.input.CharLimit = maxActionInputBytes
-	model.input.SetValue("")
-	model.input.Focus()
+	model.shell.Alerts.Clear("form-validation")
 	return model, textinput.Blink
 }
 
-func (model *Model) actionInputView() string {
-	if model.actionPrompt >= len(model.actionPrompts) {
-		return "Preparing request…"
-	}
-	prompt := model.actionPrompts[model.actionPrompt]
-	required := false
-	description := ""
-	if prompt.Body {
-		required = model.actionOperation.RequestBody != nil && model.actionOperation.RequestBody.Required
-		description = "JSON request body"
-		if model.actionOperation.RequestBody != nil && model.actionOperation.RequestBody.ContentType != "" {
-			description += " (" + model.actionOperation.RequestBody.ContentType + ")"
-		}
-	} else if prompt.Parameter != nil {
-		required = prompt.Parameter.Required
-		description = prompt.Parameter.In + " parameter " + prompt.Parameter.Name
-		if prompt.Parameter.Type != "" {
-			description += " (" + prompt.Parameter.Type + ")"
-		}
-	}
-	necessity := "optional; Enter skips"
-	if required {
-		necessity = "required"
-	}
-	return fmt.Sprintf("%s\nInput %d/%d — %s — %s\n> %s", SanitizeCell(actionLabel(model.actionOperation)), model.actionPrompt+1, len(model.actionPrompts), SanitizeCell(description), necessity, model.input.View())
-}
-
-func (model *Model) handleActionInputKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.String() == "esc" {
-		model.input.Blur()
+func (model *Model) handleFormKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if model.form == nil {
 		model.mode = modeBrowse
-		model.status = "Action canceled"
 		return model, nil
 	}
-	if key.String() != "enter" {
-		var command tea.Cmd
-		model.input, command = model.input.Update(key)
+	event, command := model.form.Update(message)
+	if event.Canceled {
+		model.form = nil
+		model.mode = modeBrowse
+		model.shell.Modal.Close()
+		model.alertInfo("action", "Action canceled")
+		return model, nil
+	}
+	if event.Invalid {
+		model.alertError("form-validation", "Correct the highlighted fields before submitting")
 		return model, command
 	}
-	prompt := model.actionPrompts[model.actionPrompt]
-	value := strings.TrimSpace(model.input.Value())
-	if prompt.Body {
-		if value == "" && model.actionOperation.RequestBody != nil && model.actionOperation.RequestBody.Required {
-			model.status = "A JSON request body is required"
-			return model, nil
-		}
-		body := []byte(value)
-		if err := validateRequestBody(model.actionOperation, body); err != nil {
-			model.status = SanitizeCell(err.Error())
-			return model, nil
-		}
-		model.actionRequest.Body = body
-	} else if prompt.Parameter != nil {
-		if value == "" {
-			if prompt.Parameter.Required {
-				model.status = fmt.Sprintf("%s parameter %s is required", prompt.Parameter.In, prompt.Parameter.Name)
-				return model, nil
-			}
-		} else {
-			parsed, err := parseParameterInput(*prompt.Parameter, value)
-			if err != nil {
-				model.status = SanitizeCell(err.Error())
-				return model, nil
-			}
-			model.actionRequest.Values[ParameterValueKey(prompt.Parameter.In, prompt.Parameter.Name)] = parsed
-		}
+	if !event.Submitted {
+		return model, command
 	}
-	model.actionPrompt++
-	model.status = ""
-	model.input.SetValue("")
-	if model.actionPrompt < len(model.actionPrompts) {
+	model.shell.Alerts.Clear("form-validation")
+	model.actionRequest = event.Request
+	return model.prepareActionSubmission(event.Request)
+}
+
+func (model *Model) prepareActionSubmission(request RequestInput) (tea.Model, tea.Cmd) {
+	if confirmation := model.actionOperation.Presentation.Confirmation; confirmation != nil {
+		model.confirmation = NewConfirmationDialog(actionLabel(model.actionOperation), *confirmation, model.shell.Keys)
+		model.mode = modeConfirmation
 		return model, nil
 	}
-	model.input.Blur()
 	model.mode = modeBrowse
+	model.shell.Modal.Close()
+	model.actionInFlight = true
+	return model, model.executeAction(model.actionOperation, request)
+}
+
+func (model *Model) handleConfirmationKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if model.confirmation == nil {
+		model.mode = modeBrowse
+		return model, nil
+	}
+	confirmed, canceled := model.confirmation.Update(message)
+	if canceled {
+		model.confirmation = nil
+		model.form = nil
+		model.mode = modeBrowse
+		model.shell.Modal.Close()
+		model.alertInfo("action", "Action canceled")
+		return model, nil
+	}
+	if !confirmed || model.actionInFlight {
+		return model, nil
+	}
+	model.actionInFlight = true
 	return model, model.executeAction(model.actionOperation, model.actionRequest)
 }
 
@@ -632,20 +831,27 @@ func (model *Model) executeAction(operation Operation, input RequestInput) tea.C
 }
 
 func (model *Model) loadCurrent() tea.Cmd {
+	return model.loadCurrentWithPurpose(false)
+}
+
+func (model *Model) loadCurrentWithPurpose(background bool) tea.Cmd {
 	view := model.currentView()
 	if view == nil {
+		return nil
+	}
+	if len(model.frames) > 0 && model.frames[len(model.frames)-1].InFlight {
 		return nil
 	}
 	if view.ListOperationID != "" {
 		operation := model.descriptor.Operation(view.ListOperationID)
 		if operation != nil {
-			return model.execute(*operation, RequestInput{Values: cloneBindings(model.frames[len(model.frames)-1].Bindings)})
+			return model.executeWithPurpose(*operation, RequestInput{Values: cloneBindings(model.frames[len(model.frames)-1].Bindings)}, background)
 		}
 	}
 	if view.GetOperationID != "" {
 		operation := model.descriptor.Operation(view.GetOperationID)
 		if operation != nil {
-			return model.execute(*operation, RequestInput{Values: cloneBindings(model.frames[len(model.frames)-1].Bindings)})
+			return model.executeWithPurpose(*operation, RequestInput{Values: cloneBindings(model.frames[len(model.frames)-1].Bindings)}, background)
 		}
 	}
 	if len(view.StreamOperationIDs) > 0 {
@@ -654,16 +860,45 @@ func (model *Model) loadCurrent() tea.Cmd {
 			return model.openStream(*operation, RequestInput{Values: cloneBindings(model.frames[len(model.frames)-1].Bindings)})
 		}
 	}
-	model.status = "View has no executable read operation"
+	model.alertError("read", "View has no executable read operation")
 	return nil
 }
 
+func (model *Model) refreshCurrent() tea.Cmd {
+	view := model.currentView()
+	if view == nil || len(model.frames) == 0 || view.Kind == "stream" || len(view.StreamOperationIDs) > 0 && view.ListOperationID == "" && view.GetOperationID == "" {
+		return nil
+	}
+	frame := &model.frames[len(model.frames)-1]
+	if frame.InFlight {
+		return nil
+	}
+	if selected := model.selectedRow(); selected != nil {
+		frame.RefreshIdentity = selected.Identity
+	}
+	return model.loadCurrentWithPurpose(true)
+}
+
 func (model *Model) execute(operation Operation, input RequestInput) tea.Cmd {
-	model.loading = true
-	viewID := model.frames[len(model.frames)-1].TargetViewID
+	return model.executeWithPurpose(operation, input, false)
+}
+
+func (model *Model) executeWithPurpose(operation Operation, input RequestInput, background bool) tea.Cmd {
+	if len(model.frames) == 0 {
+		return nil
+	}
+	frame := &model.frames[len(model.frames)-1]
+	frame.ID = model.ensureFrameID(frame.ID)
+	frame.InFlight = true
+	if background {
+		frame.Refreshing = true
+	} else if containsString(operation.Capabilities, "list") || containsString(operation.Capabilities, "get") {
+		model.loading = true
+	}
+	viewID, frameID := frame.TargetViewID, frame.ID
 	return func() tea.Msg {
 		result, err := model.client.Execute(context.Background(), operation, input)
-		return operationResultMsg{viewID: viewID, operationID: operation.ID, input: input, result: result, err: err}
+		return operationResultMsg{viewID: viewID, frameID: frameID, operationID: operation.ID, input: input, result: result, err: err, background: background}
 	}
 }
 
@@ -672,54 +907,66 @@ func (model *Model) openStream(operation Operation, input RequestInput) tea.Cmd 
 	ctx, cancel := context.WithCancel(context.Background())
 	model.streamCancel = cancel
 	model.loading = true
-	viewID := model.frames[len(model.frames)-1].TargetViewID
+	frame := &model.frames[len(model.frames)-1]
+	frame.ID = model.ensureFrameID(frame.ID)
+	frame.InFlight = true
+	viewID, frameID := frame.TargetViewID, frame.ID
 	return func() tea.Msg {
 		response, err := model.client.OpenStream(ctx, operation, input)
 		if err != nil {
-			return streamOpenedMsg{viewID: viewID, err: err}
+			return streamOpenedMsg{viewID: viewID, frameID: frameID, err: err}
 		}
 		events := make(chan streamEvent, 1)
 		go pumpStream(ctx, response.Body, operation.Response.ContentType, events)
-		return streamOpenedMsg{viewID: viewID, events: events}
+		return streamOpenedMsg{viewID: viewID, frameID: frameID, events: events}
 	}
 }
 
-func waitStreamEvent(viewID string, events <-chan streamEvent) tea.Cmd {
+func waitStreamEvent(viewID string, frameID uint64, events <-chan streamEvent) tea.Cmd {
 	return func() tea.Msg {
 		event, open := <-events
 		if !open {
 			event.done = true
 		}
-		return streamEventMsg{viewID: viewID, events: events, event: event}
+		return streamEventMsg{viewID: viewID, frameID: frameID, events: events, event: event}
 	}
 }
 
 func (model *Model) appendStreamEvent(value string) {
-	line := Sanitize(value)
-	if len(line) > maxVisibleStreamBytes {
-		start := len(line) - maxVisibleStreamBytes
-		for start < len(line) && !utf8.RuneStart(line[start]) {
-			start++
-		}
-		line = line[start:]
-	}
-	model.streamLines = append(model.streamLines, line)
-	model.streamBytes += len(line)
-	for len(model.streamLines) > maxVisibleStreamEvents || model.streamBytes > maxVisibleStreamBytes {
-		model.streamBytes -= len(model.streamLines[0])
-		model.streamLines = model.streamLines[1:]
-	}
-	model.detail.SetContent(strings.Join(model.streamLines, "\n"))
-	model.detail.GotoBottom()
+	model.DetailStreamComponent.Append(value)
 }
 
 func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd) {
-	if model.currentView() == nil || message.viewID != model.currentView().ID {
+	if model.currentView() == nil || len(model.frames) == 0 || message.viewID != model.currentView().ID || (message.frameID != 0 && message.frameID != model.frames[len(model.frames)-1].ID) {
+		for index := range model.frames {
+			if message.frameID != 0 && model.frames[index].ID == message.frameID {
+				model.frames[index].InFlight = false
+				model.frames[index].Refreshing = false
+				break
+			}
+		}
 		return model, nil
 	}
+	frame := &model.frames[len(model.frames)-1]
+	frame.InFlight = false
 	model.loading = false
+	frame.Refreshing = false
 	if message.err != nil {
-		model.status = SanitizeCell(message.err.Error())
+		model.actionInFlight = false
+		if model.form != nil {
+			model.form.inFlight = false
+		}
+		if model.confirmation != nil {
+			model.confirmation.inFlight = false
+		}
+		frame.Forbidden = strings.Contains(message.err.Error(), "HTTP 401") || strings.Contains(message.err.Error(), "HTTP 403")
+		frame.LoadFailed = !message.background && len(model.rows) == 0 && frame.Selected == nil
+		if message.background || !frame.LastSuccess.IsZero() {
+			frame.Stale = true
+			model.alertError(model.refreshAlertKey(frame.ID), message.err.Error())
+		} else {
+			model.alertError("request:"+message.operationID, message.err.Error())
+		}
 		return model, nil
 	}
 	operation := model.descriptor.Operation(message.operationID)
@@ -727,7 +974,6 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 		return model, nil
 	}
 	view := model.currentView()
-	frame := &model.frames[len(model.frames)-1]
 	frame.RequestValues = captureRequestValues(*operation, message.input.Values)
 	frame.RequestBody = decodeRuntimeBody(message.input.Body)
 	frame.RequestURL = message.result.RequestURL
@@ -735,14 +981,33 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 	frame.ResponseHeaders = message.result.Headers.Clone()
 	frame.ResponseBody = message.result.Body
 	frame.ResponseStatus = message.result.Status
+	isRead := containsString(operation.Capabilities, "list") || containsString(operation.Capabilities, "get")
+	if !isRead {
+		model.actionInFlight = false
+		model.form = nil
+		model.confirmation = nil
+		model.mode = modeBrowse
+		model.shell.Modal.Close()
+		model.shell.Alerts.Clear("request:" + message.operationID)
+		model.alertSuccess("action", "Operation completed")
+		model.postAction = true
+		return model, model.loadCurrent()
+	}
 	if containsString(operation.Capabilities, "list") && !operation.Response.Stream {
 		items, err := responseItems(message.result.Body, operation.Response.ItemsPointer)
 		if err != nil {
-			model.status = err.Error()
+			model.markReadFailure(frame, message, err)
 			return model, nil
 		}
 		model.setRows(*view, items)
-		model.status = fmt.Sprintf("Loaded %d items", len(items))
+		model.markReadSuccess(frame)
+		model.shell.Alerts.Clear("request:" + message.operationID)
+		message := fmt.Sprintf("Loaded %d items", len(items))
+		if model.postAction {
+			message = fmt.Sprintf("Operation completed; refreshed %d items", len(items))
+			model.postAction = false
+		}
+		model.alertSuccess("load", message)
 		return model, nil
 	}
 	if object, ok := message.result.Body.(map[string]any); ok {
@@ -750,66 +1015,54 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 		frame.Selected = &row
 		model.detail.SetContent(renderDetail(object))
 		model.mode = modeDetail
-		model.status = "Loaded " + view.Label
+		model.markReadSuccess(frame)
+		model.shell.Alerts.Clear("request:" + message.operationID)
+		model.alertSuccess("load", "Loaded "+view.Label)
 		return model, nil
 	}
-	model.status = "Operation completed"
+	model.markReadFailure(frame, message, fmt.Errorf("operation %s returned no displayable object", message.operationID))
 	return model, nil
 }
 
-func (model *Model) rebuildTable(view View) {
-	styles := table.DefaultStyles()
-	styles.Header = styles.Header.Bold(true).Foreground(lipgloss.Color("69"))
-	styles.Selected = styles.Selected.Foreground(lipgloss.Color("0")).Background(lipgloss.Color("214"))
-	model.table = table.New(table.WithFocused(true), table.WithHeight(max(3, model.height-8)))
-	model.table.SetStyles(styles)
-	model.rows = nil
-	model.visible = nil
-	model.configureTableColumns(view)
+func (model *Model) markReadSuccess(frame *Frame) {
+	frame.LastSuccess = model.currentTime()
+	frame.Stale, frame.Forbidden, frame.LoadFailed = false, false, false
+	model.shell.Alerts.Clear(model.refreshAlertKey(frame.ID))
 }
 
-func (model *Model) configureTableColumns(view View) {
-	model.table.SetWidth(max(1, model.width-2))
-	if len(view.Columns) == 0 {
-		model.displayColumns = nil
-		model.columnWidths = nil
-		model.leftOverflow = 0
-		model.rightOverflow = 0
-		model.table.SetHeight(max(3, model.height-8))
-		model.replaceTableColumns([]table.Column{{Title: "VALUE", Width: max(1, model.width-4)}})
+func (model *Model) markReadFailure(frame *Frame, message operationResultMsg, err error) {
+	frame.Forbidden = false
+	if message.background || !frame.LastSuccess.IsZero() || frame.Selected != nil {
+		frame.Stale = true
+		frame.LoadFailed = false
+		model.alertError(model.refreshAlertKey(frame.ID), err.Error())
 		return
 	}
+	frame.LoadFailed = true
+	model.alertError("request:"+message.operationID, err.Error())
+}
+
+func (model *Model) rebuildTable(view View) {
+	model.ensurePresentation()
+	contentWidth, contentHeight := model.pageContentSize()
 	offset := 0
 	if len(model.frames) > 0 {
 		offset = model.frames[len(model.frames)-1].ColumnOffset
+		model.frames[len(model.frames)-1].ColumnOffset = model.ResourceTableComponent.Reset(view, model.shell.Theme, contentWidth, contentHeight, offset)
+		return
 	}
-	layout := calculateColumnLayout(view, model.rows, max(1, model.width-4), offset)
-	model.displayColumns = layout.Visible
-	model.columnWidths = layout.Widths
-	model.leftOverflow = layout.LeftHidden
-	model.rightOverflow = layout.RightHidden
-	if len(model.frames) > 0 {
-		model.frames[len(model.frames)-1].ColumnOffset = layout.Offset
-	}
-	overflowHeight := 0
-	if layout.LeftHidden > 0 || layout.RightHidden > 0 {
-		overflowHeight = 1
-	}
-	model.table.SetHeight(max(3, model.height-8-overflowHeight))
-	columns := make([]table.Column, 0, len(layout.Visible))
-	for _, index := range layout.Visible {
-		columns = append(columns, table.Column{Title: columnTitle(view, view.Columns[index]), Width: layout.Widths[index]})
-	}
-	model.replaceTableColumns(columns)
+	model.ResourceTableComponent.Reset(view, model.shell.Theme, contentWidth, contentHeight, offset)
 }
 
-func (model *Model) replaceTableColumns(columns []table.Column) {
-	// Bubbles renders rows synchronously from SetColumns. Preserve the row count
-	// and cursor with empty placeholders until applyFilter projects matching cells.
-	if rowCount := len(model.table.Rows()); rowCount > 0 {
-		model.table.SetRows(make([]table.Row, rowCount))
+func (model *Model) configureTableColumns(view View) {
+	contentWidth, contentHeight := model.pageContentSize()
+	offset := 0
+	if len(model.frames) > 0 {
+		offset = model.frames[len(model.frames)-1].ColumnOffset
+		model.frames[len(model.frames)-1].ColumnOffset = model.ResourceTableComponent.Configure(view, contentWidth, contentHeight, offset)
+		return
 	}
-	model.table.SetColumns(columns)
+	model.ResourceTableComponent.Configure(view, contentWidth, contentHeight, offset)
 }
 
 func (model *Model) scrollColumns(direction int) {
@@ -834,87 +1087,32 @@ func (model *Model) scrollColumns(direction int) {
 }
 
 func (model *Model) setRows(view View, items []map[string]any) {
-	rows := make([]Row, 0, len(items))
-	for _, item := range items {
-		rows = append(rows, rowFor(view, item))
-	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		left, _ := ResolveJSONPointer(rows[i].Raw, "/"+escapePointer(view.DefaultSort))
-		right, _ := ResolveJSONPointer(rows[j].Raw, "/"+escapePointer(view.DefaultSort))
-		return scalarString(left) < scalarString(right)
-	})
-	model.rows = rows
-	model.configureTableColumns(view)
-	model.applyFilter()
-	if model.restoreIdentity != "" {
-		for index := range model.visible {
-			if model.visible[index].Identity == model.restoreIdentity {
-				model.table.SetCursor(index)
-				break
-			}
+	restoreIdentity := model.restoreIdentity
+	if len(model.frames) > 0 {
+		if model.frames[len(model.frames)-1].RefreshIdentity != "" {
+			restoreIdentity = model.frames[len(model.frames)-1].RefreshIdentity
 		}
+		model.frames[len(model.frames)-1].RefreshIdentity = ""
+		contentWidth, contentHeight := model.pageContentSize()
+		offset := model.frames[len(model.frames)-1].ColumnOffset
+		model.frames[len(model.frames)-1].ColumnOffset = model.ResourceTableComponent.SetRows(view, items, model.filter, restoreIdentity, contentWidth, contentHeight, offset)
 		model.restoreIdentity = ""
+		return
 	}
-}
-
-func rowFor(view View, item map[string]any) Row {
-	row := Row{Raw: item}
-	if view.IdentityProperty != "" {
-		if value, err := ResolveJSONPointer(item, "/"+escapePointer(view.IdentityProperty)); err == nil {
-			row.Identity = scalarString(value)
-		}
-	}
-	for _, column := range view.Columns {
-		value, _ := ResolveJSONPointer(item, "/"+escapePointer(column.Property))
-		row.Cells = append(row.Cells, SanitizeCell(scalarString(value)))
-	}
-	return row
+	contentWidth, contentHeight := model.pageContentSize()
+	model.ResourceTableComponent.SetRows(view, items, model.filter, restoreIdentity, contentWidth, contentHeight, 0)
+	model.restoreIdentity = ""
 }
 
 func (model *Model) applyFilter() {
-	needle := strings.ToLower(SanitizeCell(model.filter))
-	model.visible = nil
-	var tableRows []table.Row
-	for _, row := range model.rows {
-		cells := model.visibleCells(row)
-		filterCells := row.Cells
-		if len(filterCells) == 0 {
-			filterCells = []string{SanitizeCell(renderDetail(row.Raw))}
-		}
-		if needle != "" && !strings.Contains(strings.ToLower(strings.Join(filterCells, "\x00")), needle) {
-			continue
-		}
-		model.visible = append(model.visible, row)
-		tableRows = append(tableRows, table.Row(cells))
-	}
-	model.table.SetRows(tableRows)
-	if len(tableRows) > 0 && model.table.Cursor() < 0 {
-		model.table.SetCursor(0)
-	}
-}
-
-func (model *Model) visibleCells(row Row) []string {
-	if len(model.displayColumns) == 0 {
-		return []string{SanitizeCell(renderDetail(row.Raw))}
-	}
-	result := make([]string, 0, len(model.displayColumns))
-	for _, index := range model.displayColumns {
-		if index < len(row.Cells) {
-			result = append(result, row.Cells[index])
-		}
-	}
-	return result
+	model.ResourceTableComponent.ApplyFilter(model.filter)
 }
 
 func (model *Model) selectedRow() *Row {
 	if model.currentView() != nil && model.currentView().Kind == "item" {
 		return model.frames[len(model.frames)-1].Selected
 	}
-	index := model.table.Cursor()
-	if index < 0 || index >= len(model.visible) {
-		return nil
-	}
-	return &model.visible[index]
+	return model.ResourceTableComponent.Selected()
 }
 
 func (model *Model) currentView() *View {
@@ -944,6 +1142,27 @@ func (model *Model) addressableView(command string) *View {
 	return nil
 }
 
+func (model *Model) completeResourceCommand() {
+	prefix := strings.ToLower(strings.TrimSpace(model.CommandBar.Value()))
+	bindings := availableBindings(model.frames)
+	var candidates []string
+	for index := range model.descriptor.Views {
+		view := &model.descriptor.Views[index]
+		if view.ListOperationID == "" || !bindingsCover(view.ScopeParameters, bindings) {
+			continue
+		}
+		for _, candidate := range append([]string{view.Label, view.ID}, view.Aliases...) {
+			if prefix == "" || strings.HasPrefix(strings.ToLower(candidate), prefix) {
+				candidates = append(candidates, candidate)
+			}
+		}
+	}
+	sort.Strings(candidates)
+	if len(candidates) > 0 {
+		model.CommandBar.SetValue(candidates[0])
+	}
+}
+
 func (model *Model) breadcrumb() string {
 	parts := make([]string, 0, len(model.frames))
 	for _, frame := range model.frames {
@@ -961,16 +1180,121 @@ func (model *Model) resize() {
 		model.configureTableColumns(*view)
 		model.applyFilter()
 	}
-	model.detail.Width = max(1, model.width-2)
-	model.detail.Height = max(3, model.height-8)
+	contentWidth, contentHeight := model.pageContentSize()
+	model.detail.Width = max(1, contentWidth)
+	model.detail.Height = max(1, contentHeight)
+}
+
+func (model *Model) pageContentSize() (int, int) {
+	model.ensurePresentation()
+	view := model.currentView()
+	if view == nil {
+		layout := CalculateShellLayout(model.width, model.height, false, "", "")
+		return layout.ContentWidth, layout.ContentHeight
+	}
+	command := ""
+	if model.mode == modeFilter {
+		command = model.CommandBar.View("/")
+	} else if model.mode == modeSwitch {
+		command = model.CommandBar.View(":")
+	}
+	presentation := model.shellView(*view, model.semanticPage(*view), command)
+	layout := model.shell.Layout(presentation, model.width, model.height)
+	return layout.ContentWidth, layout.ContentHeight
+}
+
+func (model *Model) ensurePresentation() {
+	if model.shell.Keys.bindings != nil {
+		return
+	}
+	token := ""
+	if model.client != nil {
+		token = model.client.config.Token
+	}
+	model.shell = NewShell(token)
+}
+
+func (model *Model) serverOrigin() string {
+	if model.client != nil {
+		return model.client.config.BaseURL
+	}
+	if len(model.descriptor.Servers) > 0 {
+		return model.descriptor.Servers[0].URL
+	}
+	return ""
+}
+
+func (model *Model) authenticated() bool {
+	return model.client != nil && model.client.config.Token != ""
+}
+
+func presentationPulse() tea.Cmd {
+	return tea.Tick(time.Second, func(now time.Time) tea.Msg { return presentationPulseMsg{now: now} })
+}
+
+func (model *Model) currentTime() time.Time {
+	if model.now == nil {
+		model.now = time.Now
+	}
+	return model.now()
+}
+
+func (model *Model) currentLastSuccess() time.Time {
+	if len(model.frames) == 0 {
+		return time.Time{}
+	}
+	return model.frames[len(model.frames)-1].LastSuccess
+}
+
+func (model *Model) currentRefreshing() bool {
+	return len(model.frames) > 0 && model.frames[len(model.frames)-1].Refreshing
+}
+
+func (model *Model) updateStaleness(now time.Time) {
+	if len(model.frames) == 0 {
+		return
+	}
+	frame := &model.frames[len(model.frames)-1]
+	if frame.LastSuccess.IsZero() {
+		return
+	}
+	threshold := 15 * time.Second
+	if configured := 3 * model.refreshInterval; configured > threshold {
+		threshold = configured
+	}
+	if now.Sub(frame.LastSuccess) > threshold {
+		frame.Stale = true
+	}
+}
+
+func (model *Model) newFrameID() uint64 {
+	model.nextFrameID++
+	return model.nextFrameID
+}
+
+func (model *Model) ensureFrameID(id uint64) uint64 {
+	if id != 0 {
+		return id
+	}
+	return model.newFrameID()
+}
+
+func (model *Model) refreshAlertKey(frameID uint64) string {
+	return fmt.Sprintf("refresh:%d", frameID)
+}
+
+func (model *Model) clearFrameRequest(frameID uint64) {
+	for index := range model.frames {
+		if frameID != 0 && model.frames[index].ID == frameID {
+			model.frames[index].InFlight = false
+			model.frames[index].Refreshing = false
+			return
+		}
+	}
 }
 
 func (model *Model) cancelStream() {
-	if model.streamCancel != nil {
-		model.streamCancel()
-		model.streamCancel = nil
-	}
-	model.streamEvents = nil
+	model.DetailStreamComponent.Cancel()
 }
 
 func firstRootView(descriptor Descriptor) *View {
@@ -994,7 +1318,7 @@ func evaluateBindings(edge Edge, frame Frame, row Row) (map[string]any, error) {
 		var err error
 		switch binding.SourceKind {
 		case "frame-path":
-			value, _ = frame.Bindings[binding.Source]
+			value = frame.Bindings[binding.Source]
 		case "row-property":
 			value, err = ResolveJSONPointer(row.Raw, "/"+escapePointer(binding.Source))
 		case "runtime-expression":
@@ -1241,10 +1565,50 @@ func actionInputCount(operation Operation, values map[string]any) int {
 }
 
 func actionLabel(operation Operation) string {
+	if strings.TrimSpace(operation.Presentation.Label) != "" {
+		return operation.Presentation.Label
+	}
 	if strings.TrimSpace(operation.Summary) != "" {
 		return operation.Summary
 	}
 	return operation.ID
+}
+
+func (model *Model) operationsForCurrentView() []Operation {
+	view := model.currentView()
+	if view == nil {
+		return nil
+	}
+	var operations []Operation
+	for _, id := range view.OperationIDs {
+		operation := model.descriptor.Operation(id)
+		if operation == nil || containsString(operation.Capabilities, "list") || containsString(operation.Capabilities, "get") {
+			continue
+		}
+		operations = append(operations, *operation)
+	}
+	sort.Slice(operations, func(i, j int) bool { return operations[i].ID < operations[j].ID })
+	return operations
+}
+
+func (model *Model) alertInfo(key, summary string) {
+	model.ensurePresentation()
+	model.shell.Alerts.Push(key, AlertInfo, summary)
+}
+
+func (model *Model) alertSuccess(key, summary string) {
+	model.ensurePresentation()
+	model.shell.Alerts.Push(key, AlertSuccess, summary)
+}
+
+func (model *Model) alertWarning(key, summary string) {
+	model.ensurePresentation()
+	model.shell.Alerts.Push(key, AlertWarning, summary)
+}
+
+func (model *Model) alertError(key, summary string) {
+	model.ensurePresentation()
+	model.shell.Alerts.Push(key, AlertError, summary)
 }
 
 func availableBindings(frames []Frame) map[string]any {

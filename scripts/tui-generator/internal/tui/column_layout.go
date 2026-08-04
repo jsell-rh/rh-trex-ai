@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -31,22 +30,6 @@ type columnPolicy struct {
 	minimum         int
 	maximum         int
 	expansionWeight int
-}
-
-type columnScrollKeyMap struct {
-	Left  key.Binding
-	Right key.Binding
-}
-
-var tableColumnScrollKeys = columnScrollKeyMap{
-	Left: key.NewBinding(
-		key.WithKeys("left"),
-		key.WithHelp("←", "columns left"),
-	),
-	Right: key.NewBinding(
-		key.WithKeys("right"),
-		key.WithHelp("→", "columns right"),
-	),
 }
 
 func calculateColumnLayout(view View, rows []Row, available, requestedOffset int) columnLayout {
@@ -217,10 +200,11 @@ func displayCellWidth(value string) int {
 }
 
 func columnScrollDirection(message tea.KeyMsg) int {
+	registry := DefaultKeyRegistry()
 	switch {
-	case key.Matches(message, tableColumnScrollKeys.Left):
+	case registry.Matches(message, KeyColumnsLeft):
 		return -1
-	case key.Matches(message, tableColumnScrollKeys.Right):
+	case registry.Matches(message, KeyColumnsRight):
 		return 1
 	default:
 		return 0
@@ -228,7 +212,7 @@ func columnScrollDirection(message tea.KeyMsg) int {
 }
 
 func columnScrollHint() string {
-	return fmt.Sprintf("[%s/%s] columns", tableColumnScrollKeys.Left.Help().Key, tableColumnScrollKeys.Right.Help().Key)
+	return DefaultKeyRegistry().ColumnHint()
 }
 
 func renderColumnOverflow(left, right int) string {
@@ -243,7 +227,7 @@ func renderColumnOverflow(left, right int) string {
 	if right > 0 {
 		parts = append(parts, fmt.Sprintf("%d ▶", right))
 	}
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, " ")
 }
 
 func clampInt(value, low, high int) int {

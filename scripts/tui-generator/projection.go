@@ -54,7 +54,7 @@ func projectDocument(document *ir.Document) (tui.Descriptor, error) {
 		projector.operation(operation)
 	}
 	projector.reindex()
-	projector.validateReservedOperationMetadata()
+	projector.projectOperationPresentation()
 	projector.projectRelationships()
 	projector.projectCollectionItemEdges()
 	projector.applyExplicitPrecedence()
@@ -134,6 +134,7 @@ func (projector *projection) operation(operation *ir.Operation) *tui.Operation {
 	projected := tui.Operation{
 		ID: operation.ID, Method: operation.Method, Summary: operation.Summary,
 		SuccessStatuses: successStatuses(operation), Response: projector.responseShape(operation),
+		Source: tui.Source{File: operation.Source.File, Pointer: operation.Source.Pointer},
 	}
 	parts, err := compilePathParts(operation)
 	if err != nil {
@@ -417,7 +418,7 @@ func (projector *projection) applyExplicitPrecedence() {
 	projector.descriptor.Edges = filtered
 }
 
-func (projector *projection) validateReservedOperationMetadata() {
+func (projector *projection) projectOperationPresentation() {
 	for _, operation := range projector.document.Operations {
 		if operation.ID == "" {
 			continue
@@ -425,21 +426,137 @@ func (projector *projection) validateReservedOperationMetadata() {
 		if projector.isCollectionList(operation.ID) {
 			continue
 		}
-		value, ok := operation.Extensions[tuiExtension]
-		if !ok {
+		projected := projector.operations[operation.ID]
+		if projected == nil {
 			continue
 		}
-		metadata, ok := value.Value.(map[string]any)
-		if !ok {
+		value, ok := operation.Extensions[tuiExtension]
+		var metadata map[string]any
+		if ok {
+			metadata, ok = value.Value.(map[string]any)
+		}
+		if value.Value != nil && !ok {
 			projector.fatal = append(projector.fatal, diagnostic(value.Source, "operation "+operation.ID, "x-trex-tui must be an object"))
 			continue
 		}
-		for _, reserved := range []string{"label", "hotkey", "confirmation", "visibility"} {
-			if _, exists := metadata[reserved]; exists {
-				projector.fatal = append(projector.fatal, diagnostic(value.Source, "operation "+operation.ID, "reserved x-trex-tui field %q is not supported", reserved))
+		for _, name := range sortedMetadataKeys(metadata) {
+			if name == "visibility" {
+				projector.fatal = append(projector.fatal, diagnostic(value.Source, "operation "+operation.ID, "x-trex-tui field %q is unsupported", name))
+			} else if name != "label" && name != "hotkey" && name != "confirmation" {
+				projector.fatal = append(projector.fatal, diagnostic(value.Source, "operation "+operation.ID, "unknown x-trex-tui field %q", name))
 			}
 		}
+		if raw, present := metadata["label"]; present {
+			label, valid := safeNonemptyString(raw)
+			if !valid {
+				projector.fatal = append(projector.fatal, diagnostic(value.Source, "operation "+operation.ID, "label must be a non-empty terminal-safe string"))
+			} else {
+				projected.Presentation.Label = label
+			}
+		}
+		if raw, present := metadata["hotkey"]; present {
+			hotkey, valid := raw.(string)
+			if !valid || !hotkeyPattern.MatchString(hotkey) {
+				projector.fatal = append(projector.fatal, diagnostic(value.Source, "operation "+operation.ID, "hotkey must match [a-z0-9] or ctrl-[a-z]"))
+			} else if tui.DefaultKeyRegistry().Reserved(hotkey) {
+				projector.fatal = append(projector.fatal, diagnostic(value.Source, "operation "+operation.ID, "hotkey %q conflicts with the shared keybinding registry", hotkey))
+			} else {
+				projected.Presentation.Hotkey = hotkey
+			}
+		}
+		if raw, present := metadata["confirmation"]; present {
+			confirmation, err := parseConfirmation(raw, actionProjectionLabel(*projected), operation.Method == "DELETE")
+			if err != nil {
+				projector.fatal = append(projector.fatal, diagnostic(value.Source, "operation "+operation.ID, "confirmation: %v", err))
+			} else {
+				projected.Presentation.Confirmation = confirmation
+			}
+		}
+		if operation.Method == "DELETE" {
+			if projected.Presentation.Confirmation == nil {
+				projected.Presentation.Confirmation = defaultConfirmation(actionProjectionLabel(*projected), true)
+			}
+			projected.Presentation.Confirmation.Destructive = true
+		}
 	}
+	projector.validateOperationHotkeyConflicts()
+}
+
+func (projector *projection) validateOperationHotkeyConflicts() {
+	for _, view := range projector.descriptor.Views {
+		owners := make(map[string]*tui.Operation)
+		for _, operationID := range view.OperationIDs {
+			operation := projector.operations[operationID]
+			if operation == nil || operation.Presentation.Hotkey == "" {
+				continue
+			}
+			hotkey := operation.Presentation.Hotkey
+			if previous := owners[hotkey]; previous != nil {
+				previousLocation := previous.Source.File
+				if previous.Source.Pointer != "" {
+					previousLocation += "#" + previous.Source.Pointer
+				}
+				source := projector.irOperations[operation.ID].Source
+				projector.fatal = append(projector.fatal, diagnostic(source, "operation "+operation.ID, "hotkey %q conflicts with operation %s at %s on view %s", hotkey, previous.ID, previousLocation, view.ID))
+				continue
+			}
+			owners[hotkey] = operation
+		}
+	}
+}
+
+func safeNonemptyString(value any) (string, bool) {
+	text, ok := value.(string)
+	return text, ok && strings.TrimSpace(text) != "" && !tui.HasTerminalControl(text)
+}
+
+func parseConfirmation(raw any, label string, destructive bool) (*tui.Confirmation, error) {
+	metadata, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("must be an object")
+	}
+	confirmation := defaultConfirmation(label, destructive)
+	for _, name := range sortedMetadataKeys(metadata) {
+		if name != "title" && name != "message" && name != "destructive" {
+			return nil, fmt.Errorf("unknown field %q", name)
+		}
+	}
+	if rawTitle, present := metadata["title"]; present {
+		title, valid := safeNonemptyString(rawTitle)
+		if !valid {
+			return nil, fmt.Errorf("title must be a non-empty terminal-safe string")
+		}
+		confirmation.Title = title
+	}
+	if rawMessage, present := metadata["message"]; present {
+		message, valid := safeNonemptyString(rawMessage)
+		if !valid {
+			return nil, fmt.Errorf("message must be a non-empty terminal-safe string")
+		}
+		confirmation.Message = message
+	}
+	if rawDestructive, present := metadata["destructive"]; present {
+		value, valid := rawDestructive.(bool)
+		if !valid {
+			return nil, fmt.Errorf("destructive must be a boolean")
+		}
+		confirmation.Destructive = value || destructive
+	}
+	return confirmation, nil
+}
+
+func defaultConfirmation(label string, destructive bool) *tui.Confirmation {
+	return &tui.Confirmation{Title: "Confirm " + label, Message: "Run " + label + "?", Destructive: destructive}
+}
+
+func actionProjectionLabel(operation tui.Operation) string {
+	if operation.Presentation.Label != "" {
+		return operation.Presentation.Label
+	}
+	if operation.Summary != "" {
+		return operation.Summary
+	}
+	return operation.ID
 }
 
 func (projector *projection) isCollectionList(operationID string) bool {
@@ -553,13 +670,15 @@ func readableScalar(document *ir.Document, property *ir.Property) bool {
 }
 
 func (projector *projection) parameter(parameter *ir.Parameter) tui.Parameter {
-	result := tui.Parameter{Name: parameter.Name, In: parameter.In, Required: parameter.Required, Style: parameter.Style, Explode: parameter.Explode, AllowReserved: parameter.AllowReserved}
+	result := tui.Parameter{Name: parameter.Name, In: parameter.In, Required: parameter.Required, Style: parameter.Style, Explode: parameter.Explode, AllowReserved: parameter.AllowReserved, Description: parameter.Description}
 	if parameter.Schema != nil {
 		if schema := projector.document.Schema(parameter.Schema.Ref); schema != nil {
 			if len(schema.Types) > 0 {
 				result.Type = schema.Types[0]
 			}
 			result.Format, result.Pattern = schema.Format, schema.Pattern
+			result.Enum = append([]any(nil), schema.Enum...)
+			result.Default = schema.Default
 		}
 	}
 	return result
@@ -592,12 +711,14 @@ func (projector *projection) requestBody(operation *ir.Operation) *tui.RequestBo
 		if property.ReadOnly || property.Schema == nil {
 			continue
 		}
-		field := tui.InputField{Name: name, Required: property.Required, ReadOnly: property.ReadOnly, WriteOnly: property.WriteOnly}
+		field := tui.InputField{Name: name, Required: property.Required, ReadOnly: property.ReadOnly, WriteOnly: property.WriteOnly, Description: property.Description}
 		if schema := projector.document.Schema(property.Schema.Ref); schema != nil {
 			if len(schema.Types) > 0 {
 				field.Type = schema.Types[0]
 			}
 			field.Format = schema.Format
+			field.Enum = append([]any(nil), schema.Enum...)
+			field.Default = schema.Default
 		}
 		result.Fields = append(result.Fields, field)
 	}
@@ -875,6 +996,15 @@ func integer(value any) (int, bool) {
 }
 
 func sortedPropertyNames(values map[string]*ir.Property) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedMetadataKeys(values map[string]any) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -60,6 +59,9 @@ func TestDeterministicGeneratedTreeBuildsAndTests(t *testing.T) {
 	}
 	if bytes.Contains(generatedMain, []byte(`flag.String("token"`)) || !bytes.Contains(generatedMain, []byte(`flag.String("token-file"`)) {
 		t.Fatalf("generated credential flags are unsafe:\n%s", generatedMain)
+	}
+	if !bytes.Contains(generatedMain, []byte(`flag.Duration("refresh-interval", 5*time.Second`)) {
+		t.Fatalf("generated runtime lacks the pinned refresh interval default:\n%s", generatedMain)
 	}
 	runGeneratedCommand(t, first, "go", "mod", "tidy", "-diff")
 	runGeneratedCommand(t, first, "go", "mod", "verify")
@@ -229,5 +231,5 @@ func runGeneratedCommand(t *testing.T, directory, name string, arguments ...stri
 	if err != nil {
 		t.Fatalf("%s %v in %s: %v\n%s", name, arguments, directory, err, output)
 	}
-	return fmt.Sprintf("%s", output)
+	return string(output)
 }
