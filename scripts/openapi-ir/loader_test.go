@@ -103,8 +103,21 @@ func TestRepositoryOpenAPISmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(document.Operations), 12; got != want {
+	if got, want := len(document.Operations), 15; got != want {
 		t.Fatalf("repository operations = %d, want %d", got, want)
+	}
+	operationIDs := make(map[string]struct{}, len(document.Operations))
+	for _, operation := range document.Operations {
+		operationIDs[operation.ID] = struct{}{}
+	}
+	for _, operationID := range []string{
+		"listDinosaurs", "createDinosaur", "getDinosaur", "updateDinosaur", "deleteDinosaur",
+		"listFossils", "createFossil", "getFossil", "updateFossil", "deleteFossil",
+		"listScientists", "createScientist", "getScientist", "updateScientist", "deleteScientist",
+	} {
+		if _, exists := operationIDs[operationID]; !exists {
+			t.Errorf("repository operation %s not normalized", operationID)
+		}
 	}
 	for _, name := range []string{"Dinosaur", "Fossil", "Scientist"} {
 		if namedSchemaOrNil(document, name) == nil {
