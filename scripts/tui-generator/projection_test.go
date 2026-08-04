@@ -1,0 +1,275 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"testing"
+
+	ir "github.com/openshift-online/rh-trex-ai/scripts/openapi-ir"
+	"github.com/openshift-online/rh-trex-ai/scripts/tui-generator/internal/tui"
+)
+
+func TestNavigationProjectionGraphConformance(t *testing.T) {
+	descriptor := loadProjectedFixture(t, "testdata/navigation.yaml")
+
+	parents := viewWithOperation(t, descriptor, "listParents")
+	if parents.Label != "Parents" || !reflect.DeepEqual(parents.Aliases, []string{"pa"}) || parents.IdentityProperty != "id" || parents.DefaultSort != "name" {
+		t.Fatalf("typed presentation was not retained: %#v", parents)
+	}
+	if got := columnSummary(parents.Columns); !reflect.DeepEqual(got, []string{"name:NAME:100", "id:ID:90"}) {
+		t.Fatalf("columns = %#v", got)
+	}
+
+	scopedChildren := viewWithOperation(t, descriptor, "listChildren")
+	parentItem := viewWithOperation(t, descriptor, "getParent")
+	accountItem := viewWithOperation(t, descriptor, "getAccount")
+	globalChildren := viewWithOperation(t, descriptor, "listGlobalChildren")
+	if len(globalChildren.ScopeParameters) != 0 {
+		t.Fatalf("global children unexpectedly scoped: %#v", globalChildren.ScopeParameters)
+	}
+	if !operationByID(t, descriptor, "listGlobalChildren").Security.None || operationByID(t, descriptor, "listParents").Security.None {
+		t.Fatal("explicit public security and inherited bearer security were conflated")
+	}
+
+	assertExplicitRuntimeEdge(t, descriptor, parentItem.ID, scopedChildren.ID, "getParent", "$response.body#/id")
+	assertExplicitRuntimeEdge(t, descriptor, accountItem.ID, scopedChildren.ID, "getAccount", "$response.body#/id")
+
+	childItem := viewWithOperation(t, descriptor, "getChild")
+	itemEdge := edgeBetween(t, descriptor, scopedChildren.ID, childItem.ID)
+	if itemEdge.Provenance != "collection-item" || !itemEdge.Navigable {
+		t.Fatalf("collection-item edge = %#v", itemEdge)
+	}
+	if got := bindingSummary(itemEdge.Bindings); !reflect.DeepEqual(got, []string{"child_id:row-property:id", "parent_id:frame-path:parent_id"}) {
+		t.Fatalf("collection-item bindings = %#v", got)
+	}
+
+	ambiguous := viewWithOperation(t, descriptor, "listAmbiguousChildren")
+	for _, edge := range descriptor.Edges {
+		if edge.TargetViewID == ambiguous.ID && edge.Navigable {
+			t.Fatalf("ambiguous view became navigable through %#v", edge)
+		}
+	}
+	if !containsDiagnostic(descriptor.Diagnostics, "scoped view "+ambiguous.ID+" is not navigable") {
+		t.Fatalf("ambiguous-view diagnostic absent: %#v", descriptor.Diagnostics)
+	}
+
+	itemOperations := operationIDs(childItem.OperationIDs)
+	if !reflect.DeepEqual(itemOperations, []string{"archiveChild", "getChild", "patchChild", "streamChildEvents"}) {
+		t.Fatalf("child item operations = %#v", itemOperations)
+	}
+	stream := operationByID(t, descriptor, "streamChildEvents")
+	if !stream.Response.Stream || !reflect.DeepEqual(stream.Capabilities, []string{"stream"}) {
+		t.Fatalf("stream capability = %#v", stream)
+	}
+	patch := operationByID(t, descriptor, "patchChild")
+	if patch.RequestBody == nil || !patch.RequestBody.Required || len(patch.RequestBody.Fields) != 1 || patch.RequestBody.Fields[0].Name != "name" {
+		t.Fatalf("request fields did not exclude read-only values: %#v", patch.RequestBody)
+	}
+	archive := operationByID(t, descriptor, "archiveChild")
+	if gap := requiredProjectionInputs(*archive); !reflect.DeepEqual(gap, []string{"header:X-Reason", "query:notify"}) {
+		t.Fatalf("action required inputs = %#v", gap)
+	}
+}
+
+func TestMappedBindingGrammar(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		expression any
+		kind       string
+		source     string
+	}{
+		{name: "request path", expression: "$request.path.project_id", kind: "runtime-expression", source: "$request.path.project_id"},
+		{name: "response body", expression: "$response.body#/id", kind: "runtime-expression", source: "$response.body#/id"},
+		{name: "string literal", expression: "fixed", kind: "literal", source: "fixed"},
+		{name: "numeric literal", expression: 7, kind: "literal", source: "7"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			binding, err := mappedBinding("target", testCase.expression)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if binding.SourceKind != testCase.kind || binding.Source != testCase.source {
+				t.Fatalf("binding = %#v", binding)
+			}
+		})
+	}
+	for _, invalid := range []any{"$request.query.filter", "$response.header.Location", nil} {
+		if binding, err := mappedBinding("target", invalid); err == nil {
+			t.Fatalf("invalid expression %#v produced binding %#v", invalid, binding)
+		}
+	}
+}
+
+func TestInvalidPresentationExtensionsFailBeforeWriting(t *testing.T) {
+	original, err := os.ReadFile("testdata/navigation.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, old, replacement, want string
+	}{
+		{name: "unknown field", old: "        label: Parents", replacement: "        unknown-field: nope\n        label: Parents", want: `unknown x-trex-tui field "unknown-field"`},
+		{name: "invalid alias", old: "        aliases: [pa]", replacement: "        aliases: [Bad]", want: `alias "Bad" is invalid`},
+		{name: "missing sort property", old: "        default-sort: name", replacement: "        default-sort: missing", want: `default-sort "missing" is not a readable scalar property`},
+		{name: "terminal control label", old: "        label: Parents", replacement: "        label: \"bad\\u001b[31m\"", want: "terminal-safe string"},
+		{name: "reserved action metadata", old: "      operationId: archiveChild", replacement: "      operationId: archiveChild\n      x-trex-tui: {hotkey: x}", want: `reserved x-trex-tui field "hotkey" is not supported`},
+		{name: "incomplete explicit binding", old: "            children:\n              operationId: listChildren\n              parameters: {parent_id: \"$response.body#/id\"}", replacement: "            children:\n              operationId: listAmbiguousChildren", want: "unsatisfied path parameters: organization_id, project_id"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			contents := strings.Replace(string(original), testCase.old, testCase.replacement, 1)
+			if contents == string(original) {
+				t.Fatalf("fixture replacement %q did not match", testCase.old)
+			}
+			directory := t.TempDir()
+			specPath := filepath.Join(directory, "invalid.yaml")
+			if err := os.WriteFile(specPath, []byte(contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			document, err := ir.Load(specPath, ir.LoadOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = projectDocument(document)
+			if err == nil || !strings.Contains(err.Error(), testCase.want) || !strings.Contains(err.Error(), specPath+"#/") {
+				t.Fatalf("diagnostic = %v, want location and %q", err, testCase.want)
+			}
+
+			output := filepath.Join(directory, "output")
+			err = generate(generateOptions{SpecPath: specPath, OutDir: output, Module: "example.com/invalid", Binary: "invalid-tui"})
+			if err == nil {
+				t.Fatal("invalid projection generated output")
+			}
+			if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+				t.Fatalf("invalid generation left output behind: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestUnsupportedRequiredSecurityFailsProjection(t *testing.T) {
+	original, err := os.ReadFile("testdata/navigation.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := strings.Replace(string(original),
+		"Bearer: {type: http, scheme: bearer, bearerFormat: JWT}",
+		"Bearer: {type: apiKey, in: header, name: X-API-Key}", 1)
+	specPath := filepath.Join(t.TempDir(), "unsupported-security.yaml")
+	if err := os.WriteFile(specPath, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	document, err := ir.Load(specPath, ir.LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = projectDocument(document)
+	if err == nil || !strings.Contains(err.Error(), "operation listParents") || !strings.Contains(err.Error(), "declared: Bearer") {
+		t.Fatalf("unsupported-security diagnostic = %v", err)
+	}
+}
+
+func loadProjectedFixture(t *testing.T, path string) tui.Descriptor {
+	t.Helper()
+	document, err := ir.Load(path, ir.LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := projectDocument(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return descriptor
+}
+
+func viewWithOperation(t *testing.T, descriptor tui.Descriptor, operationID string) *tui.View {
+	t.Helper()
+	for index := range descriptor.Views {
+		for _, candidate := range descriptor.Views[index].OperationIDs {
+			if candidate == operationID {
+				return &descriptor.Views[index]
+			}
+		}
+	}
+	t.Fatalf("view for operation %s not found", operationID)
+	return nil
+}
+
+func operationByID(t *testing.T, descriptor tui.Descriptor, id string) *tui.Operation {
+	t.Helper()
+	operation := descriptor.Operation(id)
+	if operation == nil {
+		t.Fatalf("operation %s not found", id)
+	}
+	return operation
+}
+
+func edgeBetween(t *testing.T, descriptor tui.Descriptor, source, target string) *tui.Edge {
+	t.Helper()
+	for index := range descriptor.Edges {
+		edge := &descriptor.Edges[index]
+		if edge.SourceViewID == source && edge.TargetViewID == target {
+			return edge
+		}
+	}
+	t.Fatalf("edge %s -> %s not found", source, target)
+	return nil
+}
+
+func assertExplicitRuntimeEdge(t *testing.T, descriptor tui.Descriptor, source, target, sourceOperation, expression string) {
+	t.Helper()
+	edge := edgeBetween(t, descriptor, source, target)
+	if edge.Provenance != "explicit-link" || edge.SourceOperationID != sourceOperation || edge.TargetOperationID != "listChildren" || !edge.Navigable {
+		t.Fatalf("explicit edge = %#v", edge)
+	}
+	if got := bindingSummary(edge.Bindings); !reflect.DeepEqual(got, []string{"parent_id:runtime-expression:" + expression}) {
+		t.Fatalf("explicit bindings = %#v", got)
+	}
+}
+
+func bindingSummary(bindings []tui.Binding) []string {
+	result := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		result = append(result, binding.Target+":"+binding.SourceKind+":"+binding.Source)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func columnSummary(columns []tui.Column) []string {
+	result := make([]string, 0, len(columns))
+	for _, column := range columns {
+		result = append(result, column.Property+":"+column.Label+":"+strconv.Itoa(column.Priority))
+	}
+	return result
+}
+
+func operationIDs(values []string) []string {
+	result := append([]string(nil), values...)
+	sort.Strings(result)
+	return result
+}
+
+func containsDiagnostic(diagnostics []string, want string) bool {
+	for _, diagnostic := range diagnostics {
+		if strings.Contains(diagnostic, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func requiredProjectionInputs(operation tui.Operation) []string {
+	var result []string
+	for _, parameter := range operation.Parameters {
+		if parameter.Required && parameter.In != "path" {
+			result = append(result, parameter.In+":"+parameter.Name)
+		}
+	}
+	sort.Strings(result)
+	return result
+}

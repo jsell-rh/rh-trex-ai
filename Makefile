@@ -97,9 +97,10 @@ help:
 	@echo "make generate-sdk-python  generate Python SDK only"
 	@echo "make generate-sdk-ts      generate TypeScript SDK only"
 	@echo "make generate-cli         generate CLI from OpenAPI"
-	@echo "make generate-all         generate SDK + CLI + console plugin"
+	@echo "make generate-tui         generate standalone terminal UI from OpenAPI"
+	@echo "make generate-all         generate SDK + CLI + console plugin + TUI"
 	@echo "make generate-console-plugin  generate OpenShift Console dynamic plugin"
-	@echo "make generate-clean       remove all generated SDK/CLI/plugin output"
+	@echo "make generate-clean       remove all generated SDK/CLI/plugin/TUI output"
 	@echo "$(fake)"
 .PHONY: help
 
@@ -223,7 +224,8 @@ test-generators:
 		scripts/openapi-ir \
 		scripts/sdk-generator \
 		scripts/cli-generator \
-		scripts/console-plugin-generator; do \
+		scripts/console-plugin-generator \
+		scripts/tui-generator; do \
 			echo "Testing $$module"; \
 			(cd "$$module" && \
 				GOWORK=off \
@@ -436,7 +438,7 @@ db/teardown:
 	$(container_tool) stop psql-rhtrex
 	$(container_tool) rm psql-rhtrex
 
-### SDK and CLI Generation
+### SDK, CLI, Console, and TUI Generation
 
 # SDK generation output directories
 SDK_GO_OUT ?= $(PWD)/generated/sdk/go
@@ -453,6 +455,11 @@ CLI_MODULE ?= github.com/openshift-online/rh-trex-ai-cli
 # Console plugin generation output directory
 CONSOLE_PLUGIN_OUT ?= $(PWD)/generated/console-plugin
 CONSOLE_PLUGIN_NAME ?= rh-trex-ai-console
+
+# Standalone TUI generation output directory
+TUI_OUT ?= $(PWD)/generated/tui
+TUI_BINARY ?= trex-tui
+TUI_MODULE ?= github.com/openshift-online/rh-trex-ai-tui
 
 .PHONY: generate-sdk
 generate-sdk:
@@ -521,8 +528,18 @@ generate-console-plugin:
 		--project rh-trex-ai
 	@echo "Console plugin generated in $(CONSOLE_PLUGIN_OUT)"
 
+.PHONY: generate-tui
+generate-tui:
+	@echo "Generating standalone TUI from OpenAPI specs..."
+	cd scripts/tui-generator && $(GO) run . \
+		--spec $(PWD)/openapi/openapi.yaml \
+		--out $(TUI_OUT) \
+		--binary $(TUI_BINARY) \
+		--module $(TUI_MODULE)
+	@echo "TUI generated in $(TUI_OUT)"
+
 .PHONY: generate-all
-generate-all: generate-sdk generate-cli generate-console-plugin
+generate-all: generate-sdk generate-cli generate-console-plugin generate-tui
 	@echo "All generators complete."
 
 .PHONY: generate-clean
