@@ -23,6 +23,9 @@ func TestNavigationProjectionGraphConformance(t *testing.T) {
 	if got := columnSummary(parents.Columns); !reflect.DeepEqual(got, []string{"name:NAME:100", "id:ID:90"}) {
 		t.Fatalf("columns = %#v", got)
 	}
+	if parents.Columns[0].Type != "string" || parents.Columns[1].Type != "string" {
+		t.Fatalf("column schema types were not retained: %#v", parents.Columns)
+	}
 
 	scopedChildren := viewWithOperation(t, descriptor, "listChildren")
 	parentItem := viewWithOperation(t, descriptor, "getParent")

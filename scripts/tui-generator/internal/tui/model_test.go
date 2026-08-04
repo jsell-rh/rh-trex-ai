@@ -406,21 +406,77 @@ func TestEvaluateStandardLinkRuntimeExpressions(t *testing.T) {
 	}
 }
 
-func TestColumnPriorityControlsNarrowTerminalRetention(t *testing.T) {
-	model := &Model{width: 25, height: 20}
-	view := View{Columns: []Column{
-		{Property: "low", Label: "LOW", Priority: 1},
-		{Property: "high", Label: "HIGH", Priority: 100},
-		{Property: "medium", Label: "MEDIUM", Priority: 50},
-	}}
-	model.rebuildTable(view)
-	if !reflect.DeepEqual(model.displayColumns, []int{1}) {
-		t.Fatalf("narrow retained columns = %#v, want highest-priority index", model.displayColumns)
+func TestModelScrollsColumnsWithoutChangingRowsOrFilterWidths(t *testing.T) {
+	view := View{
+		ID: "records", Kind: "collection", Label: "Records", IdentityProperty: "id", DefaultSort: "a",
+		Columns: []Column{
+			{Property: "a", Label: "A", Priority: 100, Type: "integer"},
+			{Property: "b", Label: "B", Priority: 90, Type: "integer"},
+			{Property: "c", Label: "C", Priority: 80, Type: "integer"},
+			{Property: "d", Label: "D", Priority: 70, Type: "integer"},
+			{Property: "e", Label: "E", Priority: 60, Type: "integer"},
+			{Property: "f", Label: "F", Priority: 50, Type: "integer"},
+		},
 	}
-	model.width = 46
-	model.configureTableColumns(view)
-	if !reflect.DeepEqual(model.displayColumns, []int{1, 2}) {
-		t.Fatalf("wider retained columns = %#v, want priority order retained in declaration order", model.displayColumns)
+	model := &Model{
+		descriptor: Descriptor{Views: []View{view}}, width: 24, height: 20,
+		frames: []Frame{{TargetViewID: view.ID, Label: view.Label, Bindings: map[string]any{}}},
+	}
+	model.rebuildTable(view)
+	items := []map[string]any{
+		{"id": "record-1", "a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": "needle-one"},
+		{"id": "record-2", "a": 2, "b": 3, "c": 4, "d": 5, "e": 6, "f": "needle-two"},
+	}
+	model.setRows(view, items)
+	if !reflect.DeepEqual(model.displayColumns, []int{0, 1, 2}) || model.leftOverflow != 0 || model.rightOverflow != 3 {
+		t.Fatalf("initial horizontal state = columns %v, left %d, right %d", model.displayColumns, model.leftOverflow, model.rightOverflow)
+	}
+	if output := model.tableView(); strings.Contains(output, "◀") || !strings.Contains(output, "3 ▶") {
+		t.Fatalf("left-edge affordance = %q", output)
+	}
+	model.table.SetCursor(1)
+	selected := model.selectedRow()
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if model.frames[0].ColumnOffset != 1 || !reflect.DeepEqual(model.displayColumns, []int{1, 2, 3}) {
+		t.Fatalf("scrolled state = frame %#v, columns %v", model.frames[0], model.displayColumns)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if model.frames[0].ColumnOffset != 2 || !reflect.DeepEqual(model.displayColumns, []int{2, 3, 4}) {
+		t.Fatalf("second scrolled state = frame %#v, columns %v", model.frames[0], model.displayColumns)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if model.frames[0].ColumnOffset != 3 || !reflect.DeepEqual(model.displayColumns, []int{3, 4, 5}) {
+		t.Fatalf("right-edge state = frame %#v, columns %v", model.frames[0], model.displayColumns)
+	}
+	if output := model.tableView(); !strings.Contains(output, "◀ 3") || strings.Contains(output, "▶") {
+		t.Fatalf("right-edge affordance = %q", output)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if model.frames[0].ColumnOffset != 2 || !reflect.DeepEqual(model.displayColumns, []int{2, 3, 4}) {
+		t.Fatalf("left-scrolled state = frame %#v, columns %v", model.frames[0], model.displayColumns)
+	}
+	if after := model.selectedRow(); selected == nil || after == nil || after.Identity != selected.Identity {
+		t.Fatalf("row selection changed during horizontal scroll: before %#v, after %#v", selected, after)
+	}
+
+	widths := append([]int(nil), model.columnWidths...)
+	model.filter = "needle"
+	model.applyFilter()
+	if len(model.visible) != 2 || !reflect.DeepEqual(widths, model.columnWidths) {
+		t.Fatalf("off-screen filter changed rows or widths: rows %d, widths %v -> %v", len(model.visible), widths, model.columnWidths)
+	}
+	if output := model.View(); !strings.Contains(output, "◀ 2") || !strings.Contains(output, "1 ▶") || !strings.Contains(output, columnScrollHint()) {
+		t.Fatalf("overflow affordance absent from view: %q", output)
+	}
+	model.setRows(view, items)
+	if model.frames[0].ColumnOffset != 2 || model.leftOverflow != 2 {
+		t.Fatalf("refresh lost horizontal offset: frame %#v, left %d", model.frames[0], model.leftOverflow)
+	}
+
+	model.width = 50
+	model.resize()
+	if model.frames[0].ColumnOffset != 0 || model.leftOverflow != 0 || model.rightOverflow != 0 || len(model.displayColumns) != len(view.Columns) {
+		t.Fatalf("wide resize did not clamp offset and reveal all columns: frame %#v, columns %v, left %d, right %d", model.frames[0], model.displayColumns, model.leftOverflow, model.rightOverflow)
 	}
 }
 

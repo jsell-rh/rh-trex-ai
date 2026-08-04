@@ -173,7 +173,7 @@ func (projector *projection) applyPresentation(view *tui.View, schema *ir.Schema
 	names := sortedPropertyNames(properties)
 	for _, name := range names {
 		if readableScalar(projector.document, properties[name]) {
-			view.Columns = append(view.Columns, tui.Column{Property: name, Label: strings.ToUpper(strings.ReplaceAll(name, "_", " "))})
+			view.Columns = append(view.Columns, projector.presentationColumn(name, strings.ToUpper(strings.ReplaceAll(name, "_", " ")), 0, properties[name]))
 		}
 	}
 	if len(view.Columns) > 0 {
@@ -275,7 +275,7 @@ func (projector *projection) parseColumns(raw any, properties map[string]*ir.Pro
 		}
 		if propertyOK && labelOK && priorityOK && readableScalar(projector.document, properties[property]) && !seen[property] && !tui.HasTerminalControl(label) && strings.TrimSpace(label) != "" {
 			seen[property] = true
-			result = append(result, tui.Column{Property: property, Label: label, Priority: priority})
+			result = append(result, projector.presentationColumn(property, label, priority, properties[property]))
 		}
 	}
 	return result, errors.Join(failures...)
@@ -518,6 +518,22 @@ func (projector *projection) readableScalarProperties(schemaRef string) map[stri
 		}
 	}
 	return result
+}
+
+func (projector *projection) presentationColumn(property, label string, priority int, source *ir.Property) tui.Column {
+	column := tui.Column{Property: property, Label: label, Priority: priority}
+	if source == nil || source.Schema == nil {
+		return column
+	}
+	schema := projector.document.Schema(source.Schema.Ref)
+	if schema == nil {
+		return column
+	}
+	if len(schema.Types) > 0 {
+		column.Type = schema.Types[0]
+	}
+	column.Format = schema.Format
+	return column
 }
 
 func readableScalar(document *ir.Document, property *ir.Property) bool {

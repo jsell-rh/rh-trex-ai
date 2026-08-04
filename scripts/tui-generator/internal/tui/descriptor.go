@@ -52,6 +52,8 @@ type Column struct {
 	Property string `json:"property"`
 	Label    string `json:"label"`
 	Priority int    `json:"priority"`
+	Type     string `json:"type,omitempty"`
+	Format   string `json:"format,omitempty"`
 }
 
 type Source struct {

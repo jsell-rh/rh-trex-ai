@@ -28,6 +28,7 @@ type Frame struct {
 	EdgeID           string
 	SourceViewID     string
 	SelectedIdentity string
+	ColumnOffset     int
 	Bindings         map[string]any
 	TargetViewID     string
 	Label            string
@@ -71,6 +72,9 @@ type Model struct {
 	rows             []Row
 	visible          []Row
 	displayColumns   []int
+	columnWidths     []int
+	leftOverflow     int
+	rightOverflow    int
 	table            table.Model
 	chooser          table.Model
 	input            textinput.Model
@@ -211,9 +215,9 @@ func (model *Model) View() string {
 	var body string
 	switch model.mode {
 	case modeFilter:
-		body = model.table.View() + "\n/" + model.input.View()
+		body = model.tableView() + "\n/" + model.input.View()
 	case modeSwitch:
-		body = model.table.View() + "\n:" + model.input.View()
+		body = model.tableView() + "\n:" + model.input.View()
 	case modeRelationships, modeActions:
 		body = model.chooser.View()
 	case modeActionInput:
@@ -221,7 +225,7 @@ func (model *Model) View() string {
 	case modeDetail:
 		body = model.detail.View()
 	default:
-		body = model.table.View()
+		body = model.tableView()
 	}
 	header := lipgloss.NewStyle().Bold(true).Render(SanitizeCell(model.descriptor.Title) + " — " + SanitizeCell(view.Label))
 	status := SanitizeCell(model.status)
@@ -230,6 +234,14 @@ func (model *Model) View() string {
 	}
 	hints := "[:] resources  [/] filter  [Enter] navigate  [d] detail  [a] actions  [Esc] back  [q] quit"
 	return header + "\n" + SanitizeCell(model.breadcrumb()) + "\n" + body + "\n" + hints + "\n" + status + "\n"
+}
+
+func (model *Model) tableView() string {
+	view := model.table.View()
+	if overflow := renderColumnOverflow(model.leftOverflow, model.rightOverflow); overflow != "" {
+		view += "\n" + overflow
+	}
+	return view
 }
 
 func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -263,6 +275,10 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var command tea.Cmd
 		model.detail, command = model.detail.Update(key)
 		return model, command
+	}
+	if direction := columnScrollDirection(key); direction != 0 {
+		model.scrollColumns(direction)
+		return model, nil
 	}
 	switch key.String() {
 	case "/":
@@ -747,42 +763,65 @@ func (model *Model) rebuildTable(view View) {
 	styles.Selected = styles.Selected.Foreground(lipgloss.Color("0")).Background(lipgloss.Color("214"))
 	model.table = table.New(table.WithFocused(true), table.WithHeight(max(3, model.height-8)))
 	model.table.SetStyles(styles)
-	model.configureTableColumns(view)
 	model.rows = nil
 	model.visible = nil
+	model.configureTableColumns(view)
 }
 
 func (model *Model) configureTableColumns(view View) {
+	model.table.SetWidth(max(1, model.width-2))
 	if len(view.Columns) == 0 {
 		model.displayColumns = nil
-		model.table.SetColumns([]table.Column{{Title: "VALUE", Width: max(8, model.width-4)}})
+		model.columnWidths = nil
+		model.leftOverflow = 0
+		model.rightOverflow = 0
+		model.table.SetHeight(max(3, model.height-8))
+		model.table.SetColumns([]table.Column{{Title: "VALUE", Width: max(1, model.width-4)}})
 		return
 	}
-	available := max(10, model.width-4)
-	retained := max(1, available/21)
-	if retained > len(view.Columns) {
-		retained = len(view.Columns)
+	offset := 0
+	if len(model.frames) > 0 {
+		offset = model.frames[len(model.frames)-1].ColumnOffset
 	}
-	indexes := make([]int, len(view.Columns))
-	for index := range indexes {
-		indexes[index] = index
+	layout := calculateColumnLayout(view, model.rows, max(1, model.width-4), offset)
+	model.displayColumns = layout.Visible
+	model.columnWidths = layout.Widths
+	model.leftOverflow = layout.LeftHidden
+	model.rightOverflow = layout.RightHidden
+	if len(model.frames) > 0 {
+		model.frames[len(model.frames)-1].ColumnOffset = layout.Offset
 	}
-	sort.SliceStable(indexes, func(i, j int) bool {
-		left, right := view.Columns[indexes[i]], view.Columns[indexes[j]]
-		if left.Priority != right.Priority {
-			return left.Priority > right.Priority
-		}
-		return indexes[i] < indexes[j]
-	})
-	indexes = indexes[:retained]
-	sort.Ints(indexes)
-	model.displayColumns = indexes
-	width := max(8, available/len(indexes)-1)
-	columns := make([]table.Column, 0, len(indexes))
-	for _, index := range indexes {
-		columns = append(columns, table.Column{Title: SanitizeCell(view.Columns[index].Label), Width: width})
+	overflowHeight := 0
+	if layout.LeftHidden > 0 || layout.RightHidden > 0 {
+		overflowHeight = 1
+	}
+	model.table.SetHeight(max(3, model.height-8-overflowHeight))
+	columns := make([]table.Column, 0, len(layout.Visible))
+	for _, index := range layout.Visible {
+		columns = append(columns, table.Column{Title: columnTitle(view, view.Columns[index]), Width: layout.Widths[index]})
 	}
 	model.table.SetColumns(columns)
+}
+
+func (model *Model) scrollColumns(direction int) {
+	if len(model.frames) == 0 {
+		return
+	}
+	frame := &model.frames[len(model.frames)-1]
+	switch {
+	case direction < 0 && model.leftOverflow > 0:
+		frame.ColumnOffset--
+	case direction > 0 && model.rightOverflow > 0:
+		frame.ColumnOffset++
+	default:
+		return
+	}
+	view := model.currentView()
+	if view == nil {
+		return
+	}
+	model.configureTableColumns(*view)
+	model.applyFilter()
 }
 
 func (model *Model) setRows(view View, items []map[string]any) {
@@ -796,6 +835,7 @@ func (model *Model) setRows(view View, items []map[string]any) {
 		return scalarString(left) < scalarString(right)
 	})
 	model.rows = rows
+	model.configureTableColumns(view)
 	model.applyFilter()
 	if model.restoreIdentity != "" {
 		for index := range model.visible {
@@ -828,7 +868,11 @@ func (model *Model) applyFilter() {
 	var tableRows []table.Row
 	for _, row := range model.rows {
 		cells := model.visibleCells(row)
-		if needle != "" && !strings.Contains(strings.ToLower(strings.Join(cells, "\x00")), needle) {
+		filterCells := row.Cells
+		if len(filterCells) == 0 {
+			filterCells = []string{SanitizeCell(renderDetail(row.Raw))}
+		}
+		if needle != "" && !strings.Contains(strings.ToLower(strings.Join(filterCells, "\x00")), needle) {
 			continue
 		}
 		model.visible = append(model.visible, row)
@@ -904,13 +948,11 @@ func (model *Model) breadcrumb() string {
 }
 
 func (model *Model) resize() {
-	model.table.SetHeight(max(3, model.height-8))
-	model.table.SetWidth(max(20, model.width-2))
 	if view := model.currentView(); view != nil {
 		model.configureTableColumns(*view)
 		model.applyFilter()
 	}
-	model.detail.Width = max(20, model.width-2)
+	model.detail.Width = max(1, model.width-2)
 	model.detail.Height = max(3, model.height-8)
 }
 
