@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -19,10 +20,10 @@ type treeEntry struct {
 	Digest [sha256.Size]byte
 }
 
-func TestDeterministicGeneratedTreeBuildsAndTests(t *testing.T) {
+func TestDeterministicGeneratedDescriptorPackage(t *testing.T) {
 	first := filepath.Join(t.TempDir(), "generated")
 	second := filepath.Join(t.TempDir(), "generated")
-	options := generateOptions{SpecPath: "testdata/navigation.yaml", Module: "example.com/navigation-tui", Binary: "navigation-tui"}
+	options := generateOptions{SpecPath: "testdata/navigation.yaml"}
 	options.OutDir = first
 	if err := generate(options); err != nil {
 		t.Fatal(err)
@@ -35,6 +36,14 @@ func TestDeterministicGeneratedTreeBuildsAndTests(t *testing.T) {
 	secondTree := snapshotTree(t, second)
 	if !reflect.DeepEqual(firstTree, secondTree) {
 		t.Fatalf("generated trees differ:\nfirst:  %#v\nsecond: %#v", firstTree, secondTree)
+	}
+	wantPaths := []string{outputMarker, "descriptor.go", "descriptor.json"}
+	gotPaths := make([]string, 0, len(firstTree))
+	for _, entry := range firstTree {
+		gotPaths = append(gotPaths, entry.Path)
+	}
+	if !reflect.DeepEqual(gotPaths, wantPaths) {
+		t.Fatalf("generated descriptor package paths = %v, want %v", gotPaths, wantPaths)
 	}
 
 	worktree, err := filepath.Abs(filepath.Join("..", ".."))
@@ -53,31 +62,18 @@ func TestDeterministicGeneratedTreeBuildsAndTests(t *testing.T) {
 			t.Fatalf("generated Go file %s lacks a stable notice", entry.Path)
 		}
 	}
-	generatedMain, err := os.ReadFile(filepath.Join(first, "cmd", "navigation-tui", "main.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(generatedMain, []byte(`flag.String("token"`)) || !bytes.Contains(generatedMain, []byte(`flag.String("token-file"`)) {
-		t.Fatalf("generated credential flags are unsafe:\n%s", generatedMain)
-	}
-	if !bytes.Contains(generatedMain, []byte(`flag.Duration("refresh-interval", 5*time.Second`)) {
-		t.Fatalf("generated runtime lacks the pinned refresh interval default:\n%s", generatedMain)
-	}
-	runGeneratedCommand(t, first, "go", "mod", "tidy", "-diff")
-	runGeneratedCommand(t, first, "go", "mod", "verify")
-	runGeneratedCommand(t, first, "go", "test", "./...")
-	runGeneratedCommand(t, first, "go", "build", "./cmd/...")
 }
 
-func TestRepositoryOpenAPIGeneratesBuildableRuntime(t *testing.T) {
-	output := filepath.Join(t.TempDir(), "repository-tui")
+func TestRepositoryOpenAPIGeneratesIntegratedServiceCommand(t *testing.T) {
+	host := t.TempDir()
+	output := filepath.Join(host, "data", "generated", "tui")
 	if err := generate(generateOptions{
 		SpecPath: filepath.Join("..", "..", "openapi", "openapi.yaml"),
-		OutDir:   output, Module: "example.com/repository-tui", Binary: "trex-tui",
+		OutDir:   output,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	descriptor, err := os.ReadFile(filepath.Join(output, "internal", "tui", "descriptor.json"))
+	descriptor, err := os.ReadFile(filepath.Join(output, "descriptor.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,9 +86,18 @@ func TestRepositoryOpenAPIGeneratesBuildableRuntime(t *testing.T) {
 			t.Fatalf("repository descriptor omitted operation %s", operationID)
 		}
 	}
-	runGeneratedCommand(t, output, "go", "mod", "tidy", "-diff")
-	runGeneratedCommand(t, output, "go", "test", "./...")
-	runGeneratedCommand(t, output, "go", "build", "./cmd/...")
+	writeIntegratedHarness(t, host)
+	runGeneratedCommand(t, host, "go", "build", "-mod=mod", "-o", "service", "./cmd/service")
+	help := runGeneratedCommand(t, host, filepath.Join(host, "service"), "--help")
+	if !strings.Contains(help, "tui") || !strings.Contains(help, "terminal UI") {
+		t.Fatalf("integrated service help omitted TUI command:\n%s", help)
+	}
+	tuiHelp := runGeneratedCommand(t, host, filepath.Join(host, "service"), "tui", "--help")
+	for _, flag := range []string{"--server", "--token-file", "--insecure", "--trust-origin", "--refresh-interval"} {
+		if !strings.Contains(tuiHelp, flag) {
+			t.Fatalf("integrated TUI help omitted %s:\n%s", flag, tuiHelp)
+		}
+	}
 }
 
 func TestGenerationReplacesOutputWithoutTouchingSibling(t *testing.T) {
@@ -113,7 +118,6 @@ func TestGenerationReplacesOutputWithoutTouchingSibling(t *testing.T) {
 	}
 	if err := generate(generateOptions{
 		SpecPath: "testdata/navigation.yaml", OutDir: output,
-		Module: "example.com/navigation-tui", Binary: "navigation-tui",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +151,6 @@ func TestGenerationRefusesToReplaceUnownedOutput(t *testing.T) {
 	}
 	err := generate(generateOptions{
 		SpecPath: "testdata/navigation.yaml", OutDir: output,
-		Module: "example.com/navigation-tui", Binary: "navigation-tui",
 	})
 	if err == nil || !strings.Contains(err.Error(), "refusing to replace unowned output") {
 		t.Fatalf("generation error = %v, want unowned-output refusal", err)
@@ -177,7 +180,6 @@ func TestGenerationRefusesSymbolicLinkOutput(t *testing.T) {
 	}
 	err := generate(generateOptions{
 		SpecPath: "testdata/navigation.yaml", OutDir: output,
-		Module: "example.com/navigation-tui", Binary: "navigation-tui",
 	})
 	if err == nil || !strings.Contains(err.Error(), "symbolic-link output") {
 		t.Fatalf("generation error = %v, want symbolic-link refusal", err)
@@ -232,4 +234,49 @@ func runGeneratedCommand(t *testing.T, directory, name string, arguments ...stri
 		t.Fatalf("%s %v in %s: %v\n%s", name, arguments, directory, err, output)
 	}
 	return string(output)
+}
+
+func writeIntegratedHarness(t *testing.T, root string) {
+	t.Helper()
+	repository, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := fmt.Sprintf(`module example.com/integrated-service
+
+go 1.24.2
+
+require github.com/openshift-online/rh-trex-ai v0.0.0
+
+replace github.com/openshift-online/rh-trex-ai => %s
+`, filepath.ToSlash(repository))
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "cmd", "service", "main.go")
+	if err := os.MkdirAll(filepath.Dir(mainPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainSource := `package main
+
+import (
+	"fmt"
+	"os"
+
+	generatedtui "example.com/integrated-service/data/generated/tui"
+	pkgcmd "github.com/openshift-online/rh-trex-ai/pkg/cmd"
+)
+
+func main() {
+	root := pkgcmd.NewRootCommand("service", "Integrated service")
+	root.AddCommand(pkgcmd.NewTUICommand(generatedtui.GetDescriptor))
+	if err := root.Execute(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

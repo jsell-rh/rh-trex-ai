@@ -97,10 +97,10 @@ help:
 	@echo "make generate-sdk-python  generate Python SDK only"
 	@echo "make generate-sdk-ts      generate TypeScript SDK only"
 	@echo "make generate-cli         generate CLI from OpenAPI"
-	@echo "make generate-tui         generate standalone terminal UI from OpenAPI"
+	@echo "make generate-tui         generate integrated TUI descriptor from OpenAPI"
 	@echo "make generate-all         generate SDK + CLI + console plugin + TUI"
 	@echo "make generate-console-plugin  generate OpenShift Console dynamic plugin"
-	@echo "make generate-clean       remove all generated SDK/CLI/plugin/TUI output"
+	@echo "make generate-clean       remove generated SDK/CLI/plugin output"
 	@echo "$(fake)"
 .PHONY: help
 
@@ -308,6 +308,7 @@ generate:
 	$(eval OPENAPI_IMAGE_ID=`$(container_tool) create -t ams-openapi -f Dockerfile.openapi .`)
 	$(container_tool) cp $(OPENAPI_IMAGE_ID):/local/pkg/api/openapi ./pkg/api/openapi
 	$(container_tool) cp $(OPENAPI_IMAGE_ID):/local/data/generated/openapi/openapi.go ./data/generated/openapi/openapi.go
+	$(MAKE) generate-tui
 .PHONY: generate
 
 run: binary
@@ -456,10 +457,8 @@ CLI_MODULE ?= github.com/openshift-online/rh-trex-ai-cli
 CONSOLE_PLUGIN_OUT ?= $(PWD)/generated/console-plugin
 CONSOLE_PLUGIN_NAME ?= rh-trex-ai-console
 
-# Standalone TUI generation output directory
-TUI_OUT ?= $(PWD)/generated/tui
-TUI_BINARY ?= trex-tui
-TUI_MODULE ?= github.com/openshift-online/rh-trex-ai-tui
+# Integrated TUI descriptor output directory
+TUI_OUT ?= $(PWD)/data/generated/tui
 
 .PHONY: generate-sdk
 generate-sdk:
@@ -530,13 +529,10 @@ generate-console-plugin:
 
 .PHONY: generate-tui
 generate-tui:
-	@echo "Generating standalone TUI from OpenAPI specs..."
+	@echo "Generating integrated TUI descriptor from OpenAPI specs..."
 	cd scripts/tui-generator && $(GO) run . \
 		--spec $(PWD)/openapi/openapi.yaml \
-		--out $(TUI_OUT) \
-		--binary $(TUI_BINARY) \
-		--module $(TUI_MODULE)
-	@echo "TUI generated in $(TUI_OUT)"
+		--out $(TUI_OUT)
 
 .PHONY: generate-all
 generate-all: generate-sdk generate-cli generate-console-plugin generate-tui

@@ -4,13 +4,13 @@
 **Status:** Active
 **ID:** CG-006
 **Related:** [OpenAPI Intermediate Representation](openapi-ir.spec.md), [REST Conventions](../api/rest-conventions.spec.md), [Authentication](../security/authentication.spec.md), [Testing Standards](../standards/testing.spec.md), [Dependency Supply Chain](../standards/dependency-supply-chain.spec.md)
-**Implements:** `scripts/tui-generator/`, `generated/tui/`, `Makefile`
+**Implements:** `scripts/tui-generator/`, `pkg/tui/`, `pkg/cmd/tui.go`, `data/generated/tui/`, `cmd/trex/main.go`, `Makefile`
 
 ---
 
 ## Purpose
 
-Define generation of a standalone, keyboard-driven terminal resource browser from the canonical OpenAPI intermediate representation. The generator projects resource views, relationships, operations, and presentation-only `x-trex-tui` metadata into deterministic descriptors consumed by one generic Bubble Tea runtime; it does not encode a fixed resource hierarchy or resource-specific client implementation.
+Define an OpenAPI-generated, keyboard-driven terminal resource browser compiled directly into the primary service executable as its `tui` subcommand. The generator projects resource views, relationships, operations, and presentation-only `x-trex-tui` metadata into deterministic descriptors consumed by one reusable Bubble Tea runtime; it does not encode a fixed resource hierarchy or resource-specific client implementation.
 
 ## Conceptual Model
 
@@ -23,7 +23,8 @@ resolved OpenAPI -> canonical IR -> TUI descriptors -> generic runtime
 | Canonical IR | Owns OpenAPI loading, operation and schema fidelity, resource views, relationships, capabilities, security state, and source diagnostics |
 | TUI projection | Validates presentation metadata and produces deterministic view, operation, relationship, binding, and authentication descriptors |
 | Generic runtime | Composes reusable pages and presentation components, executes descriptor-defined requests, manages filtering and the navigation stack, and sanitizes terminal content |
-| Generated module | Packages the descriptors, runtime, entry point, pinned dependencies, and tests as a standalone Go module under `generated/tui` |
+| Generated descriptor package | Embeds only the service-specific deterministic descriptors inside the service module under `data/generated/tui` |
+| Service command | Registers `tui` on the primary Cobra root and constructs the reusable runtime directly without a child process, sidecar executable, or runtime source copy |
 
 ## Presentation Principles
 
@@ -93,16 +94,27 @@ The generated TUI SHALL use a generic runtime driven by generated descriptors. D
 - THEN generated descriptors SHALL be sufficient to browse the new view
 - AND the generic runtime source SHALL remain unchanged
 
-### Requirement: Standalone Generated Module
+### Requirement: Integrated Service Subcommand
 
-The generator SHALL produce a standalone Go module at `generated/tui` with its own `go.mod`, executable entry point, descriptors, generic runtime, and tests. The module SHALL build without importing TRex API-server implementation packages. Its direct and transitive dependencies SHALL be reproducibly pinned and admitted under STD-004.
+The generator SHALL produce only a deterministic descriptor package beneath `data/generated/tui` in the service module. The primary service Cobra root SHALL register that package with a `tui` subcommand, and the primary service executable SHALL link the shared `pkg/tui` runtime and all required Bubble Tea dependencies directly. The generated package SHALL NOT contain a `go.mod`, executable entry point, copied runtime source, command wrapper, or shell invocation. The repository SHALL NOT generate or support a separate `trex-tui` executable.
 
-#### Scenario: Build outside the API server module
+The `tui` subcommand SHALL accept no positional arguments and SHALL preserve the existing `--server`, `--token-file`, `--insecure`, repeatable `--trust-origin`, and `--refresh-interval` behavior. It SHALL default the server from the generated OpenAPI descriptor, read credentials before starting the terminal program, construct the generic model directly, and run it in the alternate screen. Building the primary service executable and rendering its command help SHALL require no database or running service; only interactive API use SHALL require a reachable configured server.
 
-- GIVEN a TUI generated from the repository OpenAPI document
-- WHEN the generated directory is copied to an isolated temporary directory and its documented build command is run
-- THEN the executable SHALL build successfully
-- AND the build SHALL NOT require API-server source code, a database, or a running TRex service
+#### Scenario: Build and discover the integrated command
+
+- GIVEN TUI descriptors generated from the repository OpenAPI document
+- WHEN the primary service executable is built and its root help is rendered
+- THEN the executable SHALL build successfully and list the `tui` subcommand
+- AND the executable SHALL contain the generated descriptors and reusable runtime without locating or executing another binary or runtime file
+- AND the build and help commands SHALL NOT require a database or running TRex service
+
+#### Scenario: Launch with the established runtime options
+
+- GIVEN the integrated descriptor declares a default server
+- WHEN the user runs `trex tui` with any supported connection, credential, trust, security, or refresh option
+- THEN the command SHALL pass the resolved values directly into the generic TUI client configuration
+- AND invalid descriptor, credential-file, client, or Bubble Tea startup errors SHALL return through Cobra after terminal restoration
+- AND any positional argument SHALL be rejected before the TUI starts
 
 ### Requirement: Full-Screen Application Shell
 
@@ -117,7 +129,7 @@ The generated TUI SHALL run as a Bubble Tea alternate-screen application whose s
 
 ### Requirement: Service-Neutral Header and Semantic Theme
 
-The shared header's left region SHALL render sanitized `Key: Value` rows whose keys use one consistent semantic style and whose values retain their own semantic style. Its first row SHALL be `Service: <OpenAPI service title>` without appending the active page name. When the header has at least three rows, it SHALL leave flexible blank padding below that row, render `Context: <active server origin>` on the penultimate header row, and render `Status: <authentication state, active scope, and refresh state>` on the final header row. Authentication state SHALL contain no credential material. The page frame and breadcrumb SHALL remain authoritative for active page identity. When fewer than three header rows are available, the shell SHALL preserve complete left-region rows without overlap in Service, Context, then Status priority order. It SHALL omit unavailable optional values rather than display invented placeholders. Generated runtime source SHALL contain no TRex-specific logo, service name, resource kind, or color rule.
+The shared header's left region SHALL render sanitized `Key: Value` rows whose keys use one consistent semantic style and whose values retain their own semantic style. Its first row SHALL be `Service: <OpenAPI service title>` without appending the active page name. When the header has at least three rows, it SHALL leave flexible blank padding below that row, render `Context: <active server origin>` on the penultimate header row, and render `Status: <authentication state, active scope, and refresh state>` on the final header row. Authentication state SHALL contain no credential material. The page frame and breadcrumb SHALL remain authoritative for active page identity. When fewer than three header rows are available, the shell SHALL preserve complete left-region rows without overlap in Service, Context, then Status priority order. It SHALL omit unavailable optional values rather than display invented placeholders. Shared runtime source SHALL contain no TRex-specific logo, service name, resource kind, or color rule.
 
 The runtime SHALL define semantic theme tokens for primary, secondary, normal, muted, success, warning, danger, border, selected foreground and background, detail keys and values, and raw-code keys, strings, numbers, literals, and punctuation. Pages and domain components SHALL use those tokens and SHALL NOT define raw terminal colors or ad hoc Lip Gloss styles.
 
@@ -172,7 +184,7 @@ One shared layout component SHALL calculate all shell and content dimensions con
 
 ### Requirement: Reusable Presentation Component Architecture
 
-The generated runtime SHALL have exactly one implementation for each shell and presentation primitive named in the Reusable Presentation Architecture. Pages SHALL compose those primitives using semantic data and SHALL NOT draw their own outer borders, create their own theme, implement global key dispatch, position dialogs, or manage alert lifetimes. Resource-specific names, routes, schemas, and operation rules SHALL exist only in generated descriptors and runtime state, not in reusable presentation source.
+The shared runtime SHALL have exactly one implementation for each shell and presentation primitive named in the Reusable Presentation Architecture. Pages SHALL compose those primitives using semantic data and SHALL NOT draw their own outer borders, create their own theme, implement global key dispatch, position dialogs, or manage alert lifetimes. Resource-specific names, routes, schemas, and operation rules SHALL exist only in generated descriptors and runtime state, not in reusable presentation source.
 
 #### Scenario: Add a page without duplicating presentation policy
 
@@ -428,7 +440,7 @@ Create, update, and non-CRUD request input SHALL use one schema-driven form dial
 
 ### Requirement: Refresh and Stale-Data Lifecycle
 
-The generated executable SHALL accept a refresh interval whose default is five seconds and whose value `0` disables polling. Only the active readable page SHALL poll; it SHALL skip a tick while any request for that page is in flight, pause when hidden, and ignore or cancel results that no longer belong to the active navigation frame. Streaming operations SHALL use their stream lifecycle and SHALL NOT be duplicated by a polling loop. An action that changes the active resource SHALL trigger an immediate refresh after success.
+The integrated `tui` subcommand SHALL accept a refresh interval whose default is five seconds and whose value `0` disables polling. Only the active readable page SHALL poll; it SHALL skip a tick while any request for that page is in flight, pause when hidden, and ignore or cancel results that no longer belong to the active navigation frame. Streaming operations SHALL use their stream lifecycle and SHALL NOT be duplicated by a polling loop. An action that changes the active resource SHALL trigger an immediate refresh after success.
 
 The header SHALL show refresh activity and the last successful refresh age. A page SHALL become stale when the elapsed time since its last success exceeds the greater of three configured intervals or fifteen seconds. Refresh failure SHALL preserve existing content, mark it stale, and create a persistent rail error. A subsequent successful refresh SHALL clear the related error without flashing the initial loading page and SHALL restore table selection by validated identity when that row remains present.
 
@@ -453,7 +465,7 @@ The generated runtime SHALL have deterministic component tests for spacious, con
 
 #### Scenario: Prove one presentation system
 
-- GIVEN the generated module and its descriptor fixtures
+- GIVEN the shared runtime and its generated descriptor fixtures
 - WHEN component, `teatest`, and architecture conformance tests run
 - THEN snapshots SHALL prove consistent chrome and responsive behavior for every page and dialog state
 - AND transition tests SHALL prove that every error occupies the same bottom-row coordinates
@@ -750,11 +762,11 @@ The generator SHALL validate the complete TUI projection before writing target f
 - GIVEN a TUI extension selects an invalid identity property and a relationship lacks a required binding
 - WHEN generation runs against an empty output directory
 - THEN generation SHALL fail with both actionable diagnostics when safe to aggregate
-- AND it SHALL leave no partially generated module
+- AND it SHALL leave no partially generated descriptor package
 
 ### Requirement: Repository Generation Workflow
 
-The repository SHALL provide `make generate-tui`, SHALL include it in `make generate-all`, and SHALL include the TUI generator module and generated-artifact acceptance suite in `make test-generators`. Generation SHALL use an isolated temporary staging directory and replace the configured output only after successful validation and rendering. Output paths SHALL remain beneath the configured output root.
+The repository SHALL provide `make generate-tui`, SHALL invoke it from the normal `make generate` workflow, SHALL include it in `make generate-all`, and SHALL include the TUI projection and integrated-artifact acceptance suites in continuous testing. `make generate-tui` SHALL replace only the generated descriptor package beneath `data/generated/tui`; it SHALL NOT emit a standalone module or executable. Generation SHALL use an isolated temporary staging directory and replace the configured output only after successful validation and rendering. Output paths SHALL remain beneath the configured output root.
 
 #### Scenario: Generate all clients
 
@@ -762,6 +774,13 @@ The repository SHALL provide `make generate-tui`, SHALL include it in `make gene
 - WHEN `make generate-all` completes
 - THEN SDK, CLI, console, and TUI artifacts SHALL have been generated
 - AND a TUI failure SHALL prevent a partial staged TUI tree from replacing the previous output
+
+#### Scenario: Normal API generation cannot leave stale TUI descriptors
+
+- GIVEN the repository OpenAPI document changes a resource, operation, relationship, security requirement, or TUI presentation extension
+- WHEN the normal `make generate` workflow succeeds
+- THEN the OpenAPI server artifacts and integrated TUI descriptor package SHALL both reflect that same document
+- AND a subsequent primary service build SHALL compile the updated descriptor into its `tui` subcommand
 
 #### Scenario: Refuse an unowned output directory
 
@@ -835,17 +854,17 @@ An unchanged resolved OpenAPI input SHALL produce byte-for-byte identical TUI ou
 - GIVEN one resolved OpenAPI input and fixed generator dependencies
 - WHEN the TUI is generated twice in isolated directories
 - THEN both trees SHALL have identical relative paths, file modes, and SHA-256 digests
-- AND both generated modules SHALL build successfully
+- AND each tree SHALL contain only the owned generated descriptor package files
 
 ### Requirement: Repository OpenAPI Acceptance Gate
 
-Continuous integration SHALL run the TUI generator against the fully resolved repository `openapi/openapi.yaml`, generate into an isolated temporary directory, build and test the standalone module, and leave the working tree unchanged. This gate SHALL run with the shared IR conformance fixtures through `make test-generators` and SHALL require no database or external API service.
+Continuous integration SHALL run the TUI generator against the fully resolved repository `openapi/openapi.yaml`, generate an isolated descriptor package, compile that package together with the shared runtime and primary Cobra command, and leave the working tree unchanged. The gate SHALL prove that the root help exposes `tui`, that no standalone TUI entry point or module is emitted, and that runtime component and interaction tests still exercise the generated descriptor contract. This gate SHALL run with the shared IR conformance fixtures through the repository test workflow and SHALL require no database or external API service.
 
 #### Scenario: Generate the real TRex TUI
 
 - GIVEN the repository root OpenAPI document and all referenced entity documents
 - WHEN generator CI runs
-- THEN a standalone TUI SHALL be generated, built, and tested from that real document
+- THEN the integrated descriptor package and primary service `tui` subcommand SHALL be generated, built, and tested from that real document
 - AND the same job SHALL verify the SDK, CLI, console, and TUI consumers against the current canonical IR
 
 ## Design Decisions
@@ -873,5 +892,5 @@ Continuous integration SHALL run the TUI generator against the fully resolved re
 | Five-second skip-on-inflight refresh | Timely defaults avoid overlapping requests; interval `0` permits deliberate opt-out and stale content remains usable on failure |
 | API-only data path | The generated TUI works against documented REST operations and does not couple to a database, Kubernetes, or server internals |
 | Sanitize at the rendering boundary | One mandatory boundary covers metadata, API data, errors, and future render modes without relying on every caller to remember |
-| Standalone generated module | Consumers can build and distribute the TUI independently of the template service |
+| One integrated service command | The descriptor and shared runtime are compiled into the service users already install, eliminating duplicated entry points, copied runtime code, sidecar lookup, and release skew |
 | Synthetic and real-spec gates | Focused fixtures prove hard graph semantics while repository generation proves end-to-end viability |

@@ -1,7 +1,7 @@
 # Reconciliation Checkpoint
 
 **Last Updated:** 2026-08-04
-**Last Run By:** Codex (reconcile skill — API error dialog and failed-action retry implementation)
+**Last Run By:** Codex (reconcile skill — integrated primary-binary TUI implementation)
 
 ---
 
@@ -81,12 +81,12 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-040 | CG-005 | Consumer Fixture Conformance | closed | minor | All four consumer suites load the shared fixture through the canonical IR; the TUI asserts supported operations, paths, relationships, security, and its required diagnostic for the fixture's unsupported OAuth operations. |
 | GAP-055 | CG-006 | Canonical IR Consumption | closed | minor | `scripts/tui-generator` loads only `scripts/openapi-ir` and projects its normalized document; no independent YAML traversal exists. |
 | GAP-056 | CG-006 | Descriptor-Driven Generic Runtime | closed | minor | OpenAPI resources project to stable descriptors consumed by one resource-agnostic Bubble Tea model with no entity-specific tables or clients. |
-| GAP-057 | CG-006 | Standalone Generated Module | closed | minor | Generation emits a separately buildable Go module with pinned dependencies, embedded descriptors, runtime sources, tests, and a dedicated command. |
+| GAP-057 | CG-006 | Integrated Service Subcommand | closed | major | `cmd/trex` registers `pkg/cmd.NewTUICommand` with the embedded `data/generated/tui` descriptor; the command constructs the shared model directly with all established flags and no child executable or wrapper. |
 | GAP-078 | CG-006 | Full-Screen Application Shell | closed | major | `Shell.Render` exclusively owns the header, conditional command bar, framed semantic page, breadcrumb, contextual hints, modal overlay, and final-row alert rail; page transitions replace content without remounting chrome. |
 | GAP-079 | CG-006 | Service-Neutral Header and Semantic Theme | closed | minor | The centralized theme explicitly applies primary headers, selection-accent unselected text, and black selected text on that exact same accent background instead of inheriting Bubbles' pre-set foreground. |
 | GAP-093 | CG-006 | Contextual Header Shortcut Palette | closed | minor | `ShortcutPalette` measures one shared key-token width, pads variable-width tokens, gives every column the same display-cell width, and keeps every Action at the same relative offset in the terminal-right palette. |
 | GAP-080 | CG-006 | Centralized Responsive Layout | closed | major | `CalculateShellLayout` continuously clamps dimensions, preserves the fixed alert and breadcrumb rows, allocates three prompt rows whenever available, and returns all three rows to the page when the prompt closes. |
-| GAP-081 | CG-006 | Reusable Presentation Component Architecture | closed | major | Dedicated theme, layout, keys, alert, page, table, detail/stream, command, modal, form, and shell components own their policies; a static architecture test rejects presentation rules outside the designated owner. |
+| GAP-081 | CG-006 | Reusable Presentation Component Architecture | closed | major | The single runtime and all component tests now live in `pkg/tui`; generation emits only the service-specific descriptor package and no runtime copies. |
 | GAP-082 | CG-006 | Unified Page Contract | closed | major | The initial resource catalog is a synthetic semantic collection page; it uses the same `Page` lifecycle and persistent shell as collection, detail, stream, and state pages. |
 | GAP-083 | CG-006 | Shared Resource Table Page | closed | minor | Every catalog and descriptor table consumes the corrected shared style, making selected cells legible while unselected text exactly matches the theme's selected-row background without page-specific overrides. |
 | GAP-094 | CG-006 | Shared Breadcrumb Trail | closed | minor | One shared component renders sanitized lowercased navigation frames as padded `<segment>` badges, differentiates ancestors from the active badge, and elides only complete oldest ancestors while retaining the active location. |
@@ -98,7 +98,7 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-088 | CG-006 | Shared Dialog Host and Dialog Primitives | closed | major | The shared modal host owns compact Close-default error summaries and bounded scrollable details, with centralized buttons, danger styling, resize behavior, and deterministic focus/back transitions. |
 | GAP-089 | CG-006 | Schema-Driven Form Dialog | closed | major | Forms remain visibly locked until response success; failures preserve exact values and focus, return confirmed actions to editing, and require confirmation again before retry. |
 | GAP-090 | CG-006 | Refresh and Stale-Data Lifecycle | closed | major | The generated `--refresh-interval` defaults to five seconds and accepts zero; active readable frames poll without overlap, streams/hidden frames are excluded, late results are ignored, post-action refresh is immediate, and stale/error/selection/last-success state is preserved and recovered. |
-| GAP-091 | CG-006 | Presentation Component Conformance Gate | closed | major | Component, `teatest`, generated-runtime, and architecture tests cover TRex/generic errors, safe full details, compact/default focus, scrolling, background non-interruption, and confirmed/unconfirmed failed-action correction through success. |
+| GAP-091 | CG-006 | Presentation Component Conformance Gate | closed | Root tests now exercise the shared runtime in place and command tests prove descriptor parsing, direct model construction, established option propagation, root-help discovery, clean error propagation, and no wrapper process. |
 | GAP-058 | CG-006 | Resource View Graph Projection | closed | minor | Descriptors retain global/scoped views, explicit and inferred edge provenance, explicit precedence, and diagnostics for ambiguous disconnected views. |
 | GAP-059 | CG-006 | Multi-Parent Views and Navigation Stack | closed | minor | Runtime frames preserve the actual incoming edge, selected identity, bindings, and parent-specific selection across push/pop navigation. |
 | GAP-060 | CG-006 | Deterministic Path-Parameter Binding | closed | major | The shared action-candidate resolver evaluates the same navigable same-schema collection-to-item edge plan used by navigation and carries selected-row values into item forms and requests. |
@@ -111,14 +111,14 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-067 | CG-006 | Operation Security and Credential Safety | closed | major | Inherit/none/override and optional anonymous alternatives are preserved; unsupported required schemes fail, tokens use files, and credentials cannot cross origins without explicit trust. |
 | GAP-068 | CG-006 | Terminal-Safe Rendering | closed | critical | Tables, details, breadcrumbs, errors, streams, labels, and statuses pass through idempotent sanitizers covering CSI, OSC, DCS, string controls, C0/C1, DEL, layout controls, and framework markup. |
 | GAP-069 | CG-006 | Actionable Projection Diagnostics | closed | minor | Projection aggregates safe failures with file, JSON Pointer, operation/view, and field context before installing any output. |
-| GAP-070 | CG-006 | Repository Generation Workflow | closed | major | `generate-tui`, `generate-all`, and `test-generators` are wired; atomic staging uses exact ownership markers and refuses unowned or symbolic-link outputs. |
+| GAP-070 | CG-006 | Repository Generation Workflow | closed | `make generate-tui` atomically owns `data/generated/tui`, normal `make generate` invokes it, and `generate-all` plus generator CI include it. |
 | GAP-071 | CG-006 | Graph Conformance Gate | closed | minor | TUI fixtures assert flat/global and multiply scoped views, two explicit parents, explicit-over-inferred precedence, collection-item inference, and ambiguous disconnection. |
 | GAP-072 | CG-006 | Parameter-Binding and Request Gate | closed | major | `httptest` cases exercise standard Link expressions, inherited frames, selected rows, multi-scope routes, styles, collisions, validation, exact bodies/headers/auth, and failure without a request. |
 | GAP-073 | CG-006 | Capability Conformance Gate | closed | minor | A list/update/stream-only fixture and runtime chooser assertions prove documented partial capabilities are retained without inventing create/get/delete controls. |
 | GAP-074 | CG-006 | Runtime Navigation Gate | closed | minor | Generated-runtime acceptance opens compact foreground errors, navigates complete scrollable details, restores source state, and corrects retained failed-action forms before successful retry. |
 | GAP-075 | CG-006 | Terminal Injection Gate | closed | critical | Unit and `teatest` suites inject all specified terminal-control classes through table, detail, breadcrumb, error, and stream contexts and assert safe, idempotent output. |
-| GAP-076 | CG-006 | Deterministic Generation Gate | closed | minor | Two isolated generations compare relative paths, modes, and SHA-256 digests, reject host paths/timestamps, and build/test both standalone modules. |
-| GAP-077 | CG-006 | Repository OpenAPI Acceptance Gate | closed | minor | The real split repository specification generates all 15 CRUD operations into a temporary TUI module that passes tidy, test, and build under `make test-generators`. |
+| GAP-076 | CG-006 | Deterministic Generation Gate | closed | The two-run SHA-256 test asserts the exact descriptor-only tree (`descriptor.go`, `descriptor.json`, and ownership marker), stable modes and contents, and no host paths. |
+| GAP-077 | CG-006 | Repository OpenAPI Acceptance Gate | closed | The real repository spec generates an isolated descriptor package that is compiled with the shared command/runtime; acceptance asserts root and TUI help, established flags, and absence of standalone-module output. |
 | GAP-046 | STD-004 | Exact Dependency Declarations | closed | major | Node acceptance and generated container images use exact tag+digest references; npm, TypeScript, and gotestsum versions are exact. |
 | GAP-047 | STD-004 | Locked JavaScript Dependency Graph | closed | major | Console output includes a complete npm v3 lockfile and both acceptance and generated Docker builds use `npm ci --ignore-scripts`. |
 | GAP-048 | STD-004 | Minimum Dependency Age | closed | major | The live checker admits only Go and npm versions at least 14 days old, including transitive lock entries and standalone tools. |
@@ -138,7 +138,7 @@ Recommended implementation order for the remaining gaps:
 3. **Console view fidelity:** GAP-017, GAP-019, and GAP-045 — project scoped views/actions and component-test supported and absent capabilities.
 4. **Independent data gap:** GAP-005 — connect the existing advisory-lock abstraction to migration execution.
 
-API parity, CG-005, CG-006, STD-003, and STD-004 remain fully covered. The remaining codegen gaps belong to CLI, SDK, and console fidelity, plus the independent migration-lock gap.
+API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. The remaining codegen gaps belong to CLI, SDK, and console fidelity, plus the independent migration-lock gap.
 
 ## Reconciliation History
 
@@ -184,3 +184,5 @@ API parity, CG-005, CG-006, STD-003, and STD-004 remain fully covered. The remai
 | 2026-08-04 | 92.3% (179/194) | Reopened GAP-074, GAP-087, GAP-088, and GAP-091 for automatic foreground API-error dialogs with complete safe structured details, scrolling/resizing, state-preserving dismissal, and non-disruptive background failures. | Codex |
 | 2026-08-04 | 91.8% (178/194) | Refined GAP-087–091 so failed actions retain their editable form, values, and focus until success; confirmed failures return to editing and require confirmation again on retry. | Codex |
 | 2026-08-04 | 94.3% (183/194) | Closed GAP-074, GAP-087–089, and GAP-091 with compact Close-default TRex errors, safe scrollable details, non-disruptive background failures, and confirmed/unconfirmed form correction retained until success. | Codex |
+| 2026-08-04 | 91.2% (177/194) | Replaced the standalone TUI target with an integrated primary-binary `tui` contract and reopened six gaps for shared runtime ownership, descriptor-only generation, command wiring, workflow, and acceptance coverage. | Codex |
+| 2026-08-04 | 94.3% (183/194) | Closed GAP-057, GAP-070, GAP-076, GAP-077, GAP-081, and GAP-091 by moving the reusable runtime to `pkg/tui`, generating only embedded in-module descriptors, registering the real primary-binary Cobra command, removing standalone output, wiring normal generation, and proving deterministic integrated builds and command behavior. | Codex |

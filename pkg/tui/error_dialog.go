@@ -123,10 +123,10 @@ func (dialog *ErrorDialog) Update(message tea.Msg) (closeDialog bool, command te
 			dialog.expanded = false
 			return false, nil
 		case dialog.keys.Matches(key, KeyScrollUp):
-			dialog.viewport.LineUp(1)
+			dialog.viewport.ScrollUp(1)
 			return false, nil
 		case dialog.keys.Matches(key, KeyScrollDown):
-			dialog.viewport.LineDown(1)
+			dialog.viewport.ScrollDown(1)
 			return false, nil
 		case dialog.keys.Matches(key, KeyPageUp):
 			dialog.viewport.PageUp()

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openshift-online/rh-trex-ai/pkg/tui"
 	ir "github.com/openshift-online/rh-trex-ai/scripts/openapi-ir"
-	"github.com/openshift-online/rh-trex-ai/scripts/tui-generator/internal/tui"
 )
 
 func TestNavigationProjectionGraphConformance(t *testing.T) {
@@ -319,7 +319,7 @@ func TestInvalidPresentationExtensionsFailBeforeWriting(t *testing.T) {
 			}
 
 			output := filepath.Join(directory, "output")
-			err = generate(generateOptions{SpecPath: specPath, OutDir: output, Module: "example.com/invalid", Binary: "invalid-tui"})
+			err = generate(generateOptions{SpecPath: specPath, OutDir: output})
 			if err == nil {
 				t.Fatal("invalid projection generated output")
 			}

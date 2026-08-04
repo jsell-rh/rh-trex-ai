@@ -393,17 +393,15 @@ Produces a React/PatternFly application with webpack module federation, deployme
 
 ### 5. TUI Generator (`scripts/tui-generator/`)
 
-Generates a standalone Bubble Tea terminal application from the canonical OpenAPI IR. The generated descriptor retains resource views, graph relationships, exact operations, path-binding plans, security state, and optional typed `x-trex-tui` presentation metadata; one generic runtime renders every resource.
+Generates the OpenAPI-derived descriptor package consumed by the reusable Bubble Tea runtime compiled into the primary service executable. The descriptor retains resource views, graph relationships, exact operations, path-binding plans, security state, and optional typed `x-trex-tui` presentation metadata.
 
 ```bash
 make generate-tui
-cd generated/tui
-go test ./...
-go build ./cmd/trex-tui
-./trex-tui --server http://localhost:8000 --token-file /dev/stdin < token.txt
+make binary
+./trex tui --server http://localhost:8000 --token-file /dev/stdin < token.txt
 ```
 
-The generated executable intentionally has no raw `--token` argument. Use `--token-file /dev/stdin` when credentials should come from a pipe.
+The integrated command intentionally has no raw `--token` argument. Use `--token-file /dev/stdin` when credentials should come from a pipe.
 
 ---
 
@@ -418,7 +416,7 @@ The generated executable intentionally has no raw `--token` argument. Use `--tok
 | SDK (TypeScript) | 3              | 2 per resource      | 9                   |
 | CLI              | 20             | 3 per resource      | 29                  |
 | Console Plugin   | 14             | 3 per resource      | 23                  |
-| TUI              | Generic runtime | Descriptor-driven   | Standalone module   |
+| TUI              | Shared runtime   | Descriptor-driven   | Integrated command |
 | **Total**        | Generated from the canonical OpenAPI IR | | |
 
 ---
@@ -434,6 +432,6 @@ The generated executable intentionally has no raw `--token` argument. Use `--tok
 | `make generate-sdk-ts`         | Generate TypeScript SDK only              |
 | `make generate-cli`            | Generate CLI project                      |
 | `make generate-console-plugin` | Generate OpenShift Console dynamic plugin |
-| `make generate-tui`            | Generate standalone terminal UI           |
+| `make generate-tui`            | Generate integrated TUI descriptor         |
 | `make generate-all`            | Generate SDK + CLI + Console Plugin + TUI |
-| `make generate-clean`          | Remove all generated output               |
+| `make generate-clean`          | Remove standalone SDK/CLI/plugin output   |

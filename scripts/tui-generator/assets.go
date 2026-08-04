@@ -2,5 +2,5 @@ package main
 
 import "embed"
 
-//go:embed internal/tui/*.go templates/*
+//go:embed templates/*
 var generatorAssets embed.FS

@@ -2,13 +2,9 @@
 package tui
 
 import (
-	_ "embed"
 	"encoding/json"
 	"fmt"
 )
-
-//go:embed descriptor.json
-var embeddedDescriptor []byte
 
 type Descriptor struct {
 	Title           string           `json:"title"`
@@ -162,10 +158,10 @@ type Binding struct {
 	Source     string `json:"source"`
 }
 
-func LoadEmbeddedDescriptor() (Descriptor, error) {
+func ParseDescriptor(data []byte) (Descriptor, error) {
 	var descriptor Descriptor
-	if err := json.Unmarshal(embeddedDescriptor, &descriptor); err != nil {
-		return Descriptor{}, fmt.Errorf("decode embedded TUI descriptor: %w", err)
+	if err := json.Unmarshal(data, &descriptor); err != nil {
+		return Descriptor{}, fmt.Errorf("decode generated TUI descriptor: %w", err)
 	}
 	return descriptor, nil
 }

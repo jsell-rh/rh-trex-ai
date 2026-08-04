@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/openshift-online/rh-trex-ai/pkg/tui"
 	ir "github.com/openshift-online/rh-trex-ai/scripts/openapi-ir"
-	"github.com/openshift-online/rh-trex-ai/scripts/tui-generator/internal/tui"
 )
 
 const tuiExtension = "x-trex-tui"
