@@ -36,6 +36,7 @@ func TestLoaderConformance(t *testing.T) {
 		{"missing operation id", "testdata/invalid/missing-operation-id.yaml", "/paths/~1things/get"},
 		{"duplicate operation id", "testdata/invalid/duplicate-operation-id.yaml", "first declared"},
 		{"missing path parameter", "testdata/invalid/missing-path-parameter.yaml", "thing_id"},
+		{"unresolved operation link", "testdata/invalid/unresolved-operation-link.yaml", "getMissingThing"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := Load(testCase.path, LoadOptions{})
@@ -95,6 +96,22 @@ func TestDeterministicNormalization(t *testing.T) {
 	}
 	if string(firstJSON) != string(secondJSON) {
 		t.Fatal("unchanged input produced different canonical JSON")
+	}
+}
+
+func TestUnresolvedOperationLinkDiagnostic(t *testing.T) {
+	_, err := Load("testdata/invalid/unresolved-operation-link.yaml", LoadOptions{})
+	if err == nil {
+		t.Fatal("unresolved operation link unexpectedly normalized")
+	}
+	for _, expected := range []string{
+		"#/paths/~1things/get/responses/200/links/missingThing",
+		"link missingThing",
+		`target operationId "getMissingThing" was not found`,
+	} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("diagnostic = %v, want text %q", err, expected)
+		}
 	}
 }
 
