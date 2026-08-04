@@ -38,9 +38,11 @@ type RequestInput struct {
 }
 
 type Result struct {
-	Status  int
-	Headers http.Header
-	Body    any
+	Status        int
+	Headers       http.Header
+	Body          any
+	RequestURL    string
+	RequestMethod string
 }
 
 func NewClient(descriptor Descriptor, config ClientConfig) (*Client, error) {
@@ -105,7 +107,10 @@ func (client *Client) Execute(ctx context.Context, operation Operation, input Re
 	if !acceptsStatus(operation.SuccessStatuses, response.StatusCode) {
 		return Result{}, fmt.Errorf("%s returned HTTP %d: %s", operation.ID, response.StatusCode, SanitizeCell(string(data)))
 	}
-	result := Result{Status: response.StatusCode, Headers: response.Header.Clone()}
+	result := Result{
+		Status: response.StatusCode, Headers: response.Header.Clone(),
+		RequestURL: request.URL.String(), RequestMethod: request.Method,
+	}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return result, nil
 	}

@@ -38,7 +38,7 @@ func TestExactRequestAndSecurity(t *testing.T) {
 		Response:    ResponseShape{ContentType: "application/json"}, SuccessStatuses: []string{"200"},
 		Security: EffectiveSecurity{Requirements: []SecurityAlternative{{Schemes: []string{"Bearer"}}}},
 	}
-	_, err = client.Execute(context.Background(), operation, RequestInput{
+	result, err := client.Execute(context.Background(), operation, RequestInput{
 		Values: map[string]any{"parent_id": "parent one", "child_id": "child/7", "notify": true, "X-Reason": "test"},
 		Body:   []byte(`{"name":"updated"}`),
 	})
@@ -54,6 +54,9 @@ func TestExactRequestAndSecurity(t *testing.T) {
 	}
 	if request.Header.Get("Authorization") != "Bearer top-secret" || request.Header.Get("Content-Type") != "application/json" {
 		t.Fatalf("request headers = %#v", request.Header)
+	}
+	if result.RequestURL != server.URL+request.URL.RequestURI() || result.RequestMethod != http.MethodPost || result.Status != http.StatusOK {
+		t.Fatalf("captured exchange = URL %q, method %q, status %d", result.RequestURL, result.RequestMethod, result.Status)
 	}
 
 	operation.ID = "publicArchive"

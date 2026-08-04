@@ -331,22 +331,39 @@ func TestEvaluateExplicitRuntimeBindingsAndMissingValue(t *testing.T) {
 }
 
 func TestEvaluateStandardLinkRuntimeExpressions(t *testing.T) {
+	operation := Operation{Parameters: []Parameter{
+		{Name: "id", In: "path"},
+		{Name: "id", In: "query"},
+		{Name: "id", In: "header"},
+	}}
 	frame := Frame{
-		Bindings:      map[string]any{"project_id": "project/1"},
-		RequestValues: map[string]any{"project_id": "project/1", "filter": "active", "X-Tenant": "tenant-7"},
+		Bindings: map[string]any{"project_id": "project/1"},
+		RequestValues: captureRequestValues(operation, map[string]any{
+			ParameterValueKey("path", "id"):   "path-id",
+			ParameterValueKey("query", "id"):  "query-id",
+			ParameterValueKey("header", "id"): "header-id",
+		}),
 		RequestBody:   decodeRuntimeBody([]byte(`{"parent":{"id":"parent/9"}}`)),
+		RequestURL:    "https://api.example.test/parents/path-id?id=query-id",
+		RequestMethod: http.MethodPost,
 		ResponseHeaders: http.Header{
 			"Location": []string{"/children/child-3"},
 		},
-		ResponseBody: map[string]any{"id": "child-3"},
+		ResponseBody:   map[string]any{"id": "child-3"},
+		ResponseStatus: http.StatusCreated,
 	}
 	row := Row{Raw: map[string]any{"id": "fallback-row"}}
 	edge := Edge{Name: "standard expressions", Bindings: []Binding{
-		{Target: "path", SourceKind: "runtime-expression", Source: "$request.path.project_id"},
-		{Target: "query", SourceKind: "runtime-expression", Source: "$request.query.filter"},
-		{Target: "request_header", SourceKind: "runtime-expression", Source: "$request.header.x-tenant"},
+		{Target: "url", SourceKind: "runtime-expression", Source: "$url"},
+		{Target: "method", SourceKind: "runtime-expression", Source: "$method"},
+		{Target: "status", SourceKind: "runtime-expression", Source: "$statusCode"},
+		{Target: "path", SourceKind: "runtime-expression", Source: "$request.path.id"},
+		{Target: "query", SourceKind: "runtime-expression", Source: "$request.query.id"},
+		{Target: "request_header", SourceKind: "runtime-expression", Source: "$request.header.ID"},
+		{Target: "request_body_full", SourceKind: "runtime-expression", Source: "$request.body"},
 		{Target: "request_body", SourceKind: "runtime-expression", Source: "$request.body#/parent/id"},
 		{Target: "response_header", SourceKind: "runtime-expression", Source: "$response.header.location"},
+		{Target: "response_body_full", SourceKind: "runtime-expression", Source: "$response.body"},
 		{Target: "response_body", SourceKind: "runtime-expression", Source: "$response.body#/id"},
 	}}
 	bindings, err := evaluateBindings(edge, frame, row)
@@ -354,9 +371,10 @@ func TestEvaluateStandardLinkRuntimeExpressions(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{
-		"project_id": "project/1", "path": "project/1", "query": "active",
-		"request_header": "tenant-7", "request_body": "parent/9",
+		"project_id": "project/1", "url": frame.RequestURL, "method": http.MethodPost, "status": http.StatusCreated,
+		"path": "path-id", "query": "query-id", "request_header": "header-id", "request_body": "parent/9",
 		"response_header": "/children/child-3", "response_body": "child-3",
+		"request_body_full": frame.RequestBody, "response_body_full": frame.ResponseBody,
 	}
 	if !reflect.DeepEqual(bindings, want) {
 		t.Fatalf("standard runtime bindings = %#v, want %#v", bindings, want)

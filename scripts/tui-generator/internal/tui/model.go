@@ -34,8 +34,11 @@ type Frame struct {
 	Selected         *Row
 	RequestValues    map[string]any
 	RequestBody      any
+	RequestURL       string
+	RequestMethod    string
 	ResponseHeaders  http.Header
 	ResponseBody     any
+	ResponseStatus   int
 }
 
 type mode int
@@ -709,10 +712,13 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 	}
 	view := model.currentView()
 	frame := &model.frames[len(model.frames)-1]
-	frame.RequestValues = cloneBindings(message.input.Values)
+	frame.RequestValues = captureRequestValues(*operation, message.input.Values)
 	frame.RequestBody = decodeRuntimeBody(message.input.Body)
+	frame.RequestURL = message.result.RequestURL
+	frame.RequestMethod = message.result.RequestMethod
 	frame.ResponseHeaders = message.result.Headers.Clone()
 	frame.ResponseBody = message.result.Body
+	frame.ResponseStatus = message.result.Status
 	if containsString(operation.Capabilities, "list") && !operation.Response.Stream {
 		items, err := responseItems(message.result.Body, operation.Response.ItemsPointer)
 		if err != nil {
@@ -959,31 +965,41 @@ func evaluateBindings(edge Edge, frame Frame, row Row) (map[string]any, error) {
 }
 
 func evaluateExpression(expression string, frame Frame, row Row) (any, error) {
-	for _, prefix := range []string{"$request.path.", "$request.query."} {
+	switch expression {
+	case "$url":
+		if frame.RequestURL != "" {
+			return frame.RequestURL, nil
+		}
+		return nil, fmt.Errorf("request URL is absent")
+	case "$method":
+		if frame.RequestMethod != "" {
+			return frame.RequestMethod, nil
+		}
+		return nil, fmt.Errorf("request method is absent")
+	case "$statusCode":
+		if frame.ResponseStatus != 0 {
+			return frame.ResponseStatus, nil
+		}
+		return nil, fmt.Errorf("response status code is absent")
+	}
+	for _, prefix := range []string{"$request.path.", "$request.query.", "$request.header."} {
 		if !strings.HasPrefix(expression, prefix) {
 			continue
 		}
 		name := strings.TrimPrefix(expression, prefix)
-		value, ok := frame.RequestValues[name]
-		if !ok {
+		location := strings.TrimSuffix(strings.TrimPrefix(prefix, "$request."), ".")
+		value, ok := requestExpressionValue(frame.RequestValues, location, name)
+		if !ok && location == "path" {
 			value, ok = frame.Bindings[name]
 		}
 		if !ok {
-			return nil, fmt.Errorf("request parameter %s is absent", name)
+			return nil, fmt.Errorf("request %s parameter %s is absent", location, name)
 		}
 		return value, nil
 	}
-	if strings.HasPrefix(expression, "$request.header.") {
-		name := strings.TrimPrefix(expression, "$request.header.")
-		for candidate, value := range frame.RequestValues {
-			if strings.EqualFold(candidate, name) {
-				return value, nil
-			}
-		}
-		return nil, fmt.Errorf("request header %s is absent", name)
-	}
-	if expression == "$request.body#" || strings.HasPrefix(expression, "$request.body#/") {
-		return resolveRuntimeBody(frame.RequestBody, strings.TrimPrefix(expression, "$request.body#"), "request")
+	if expression == "$request.body" || expression == "$request.body#" || strings.HasPrefix(expression, "$request.body#/") {
+		pointer := strings.TrimPrefix(strings.TrimPrefix(expression, "$request.body"), "#")
+		return resolveRuntimeBody(frame.RequestBody, pointer, "request")
 	}
 	if strings.HasPrefix(expression, "$response.header.") {
 		name := strings.TrimPrefix(expression, "$response.header.")
@@ -992,14 +1008,40 @@ func evaluateExpression(expression string, frame Frame, row Row) (any, error) {
 		}
 		return nil, fmt.Errorf("response header %s is absent", name)
 	}
-	if strings.HasPrefix(expression, "$response.body#") {
+	if expression == "$response.body" || expression == "$response.body#" || strings.HasPrefix(expression, "$response.body#/") {
 		body := frame.ResponseBody
 		if body == nil {
 			body = row.Raw
 		}
-		return resolveRuntimeBody(body, strings.TrimPrefix(expression, "$response.body#"), "response")
+		pointer := strings.TrimPrefix(strings.TrimPrefix(expression, "$response.body"), "#")
+		return resolveRuntimeBody(body, pointer, "response")
 	}
 	return nil, fmt.Errorf("unsupported runtime expression %q", expression)
+}
+
+func captureRequestValues(operation Operation, values map[string]any) map[string]any {
+	result := make(map[string]any)
+	for _, parameter := range operation.Parameters {
+		if value, ok := operationParameterValue(operation, parameter, values); ok {
+			result[ParameterValueKey(parameter.In, parameter.Name)] = value
+		}
+	}
+	return result
+}
+
+func requestExpressionValue(values map[string]any, location, name string) (any, bool) {
+	if value, ok := values[ParameterValueKey(location, name)]; ok {
+		return value, true
+	}
+	if location == "header" {
+		prefix := location + "\x00"
+		for key, value := range values {
+			if strings.HasPrefix(key, prefix) && strings.EqualFold(strings.TrimPrefix(key, prefix), name) {
+				return value, true
+			}
+		}
+	}
+	return nil, false
 }
 
 func decodeRuntimeBody(body []byte) any {

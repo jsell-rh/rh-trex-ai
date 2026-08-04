@@ -127,11 +127,16 @@ func TestMappedBindingGrammar(t *testing.T) {
 		kind       string
 		source     string
 	}{
+		{name: "url", expression: "$url", kind: "runtime-expression", source: "$url"},
+		{name: "method", expression: "$method", kind: "runtime-expression", source: "$method"},
+		{name: "status code", expression: "$statusCode", kind: "runtime-expression", source: "$statusCode"},
 		{name: "request path", expression: "$request.path.project_id", kind: "runtime-expression", source: "$request.path.project_id"},
 		{name: "request query", expression: "$request.query.filter", kind: "runtime-expression", source: "$request.query.filter"},
 		{name: "request header", expression: "$request.header.X-Tenant", kind: "runtime-expression", source: "$request.header.X-Tenant"},
+		{name: "complete request body", expression: "$request.body", kind: "runtime-expression", source: "$request.body"},
 		{name: "request body", expression: "$request.body#/parent/id", kind: "runtime-expression", source: "$request.body#/parent/id"},
 		{name: "response header", expression: "$response.header.Location", kind: "runtime-expression", source: "$response.header.Location"},
+		{name: "complete response body", expression: "$response.body", kind: "runtime-expression", source: "$response.body"},
 		{name: "response body", expression: "$response.body#/id", kind: "runtime-expression", source: "$response.body#/id"},
 		{name: "string literal", expression: "fixed", kind: "literal", source: "fixed"},
 		{name: "numeric literal", expression: 7, kind: "literal", source: "7"},
@@ -146,7 +151,7 @@ func TestMappedBindingGrammar(t *testing.T) {
 			}
 		})
 	}
-	for _, invalid := range []any{"$request.query.", "$request.body", "$response.header.", nil} {
+	for _, invalid := range []any{"$request.query.", "$request.body/not-a-pointer", "$response.header.", nil} {
 		if binding, err := mappedBinding("target", invalid); err == nil {
 			t.Fatalf("invalid expression %#v produced binding %#v", invalid, binding)
 		}

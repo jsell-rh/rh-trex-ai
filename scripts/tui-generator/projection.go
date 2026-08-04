@@ -749,6 +749,10 @@ func mappedBinding(target string, expression any) (tui.Binding, error) {
 }
 
 func supportedRuntimeExpression(expression string) bool {
+	switch expression {
+	case "$url", "$method", "$statusCode":
+		return true
+	}
 	for _, prefix := range []string{
 		"$request.path.",
 		"$request.query.",
@@ -759,8 +763,8 @@ func supportedRuntimeExpression(expression string) bool {
 			return true
 		}
 	}
-	for _, prefix := range []string{"$request.body#", "$response.body#"} {
-		if expression == prefix || strings.HasPrefix(expression, prefix+"/") {
+	for _, prefix := range []string{"$request.body", "$response.body"} {
+		if expression == prefix || expression == prefix+"#" || strings.HasPrefix(expression, prefix+"#/") {
 			return true
 		}
 	}
