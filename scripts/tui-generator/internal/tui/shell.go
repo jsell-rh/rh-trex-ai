@@ -4,9 +4,20 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/charmbracelet/x/ansi"
 )
+
+type headerLineKind uint8
+
+const (
+	headerServer headerLineKind = iota
+	headerIdentity
+	headerStatus
+)
+
+type headerLine struct {
+	value string
+	kind  headerLineKind
+}
 
 type HeaderModel struct {
 	Service       string
@@ -47,7 +58,8 @@ func (shell *Shell) shortcuts(view ShellView) []ShortcutHint {
 }
 
 func (shell *Shell) Layout(view ShellView, width, height int) ShellLayout {
-	return CalculateShellLayout(width, height, view.Command != "", headerMetadata(view.Header), shell.shortcuts(view))
+	lines := buildHeaderLines(view.Header)
+	return CalculateShellLayout(width, height, view.Command != "", headerLineValues(lines), shell.shortcuts(view))
 }
 
 func (shell *Shell) Render(view ShellView, width, height int) string {
@@ -57,8 +69,7 @@ func (shell *Shell) Render(view ShellView, width, height int) string {
 	layout := shell.Layout(view, width, height)
 	rows := make([]string, 0, layout.Height)
 	if layout.HeaderRows > 0 {
-		rows = append(rows, shell.Theme.ClampLine(renderHeader(view.Header, layout, shell.Theme), layout.Width))
-		rows = append(rows, layout.ShortcutPalette.Render(shell.Theme, layout.Width)...)
+		rows = append(rows, renderHeader(view.Header, layout, shell.Theme)...)
 	}
 	if layout.CommandRows > 0 {
 		rows = append(rows, shell.Theme.CommandBar(view.Command, layout.Width))
@@ -87,50 +98,87 @@ func (shell *Shell) Render(view ShellView, width, height int) string {
 	return strings.Join(rows, "\n")
 }
 
-func renderHeader(header HeaderModel, layout ShellLayout, theme Theme) string {
-	primary := SanitizeCell(header.Service)
-	if header.Page != "" {
-		if primary != "" {
-			primary += " — "
-		}
-		primary += SanitizeCell(header.Page)
-	}
-	result := theme.Header(primary)
-	if layout.ShowMetadata {
-		if metadata := headerMetadata(header); metadata != "" {
-			gap := max(1, layout.Width-ansi.StringWidth(result)-ansi.StringWidth(metadata))
-			if ansi.StringWidth(result)+gap+ansi.StringWidth(metadata) <= layout.Width {
-				result += strings.Repeat(" ", gap) + theme.Subtle(metadata)
+func renderHeader(header HeaderModel, layout ShellLayout, theme Theme) []string {
+	leftLines := buildHeaderLines(header)
+	rightLines := layout.ShortcutPalette.Render(theme, layout.ShortcutWidth)
+	rows := make([]string, 0, layout.HeaderRows)
+	for row := 0; row < layout.HeaderRows; row++ {
+		var line strings.Builder
+		if layout.HeaderLeftWidth > 0 {
+			left := ""
+			if row < len(leftLines) {
+				switch leftLines[row].kind {
+				case headerServer:
+					left = theme.Header(leftLines[row].value)
+				case headerIdentity:
+					left = theme.Emphasis(leftLines[row].value)
+				default:
+					left = theme.Subtle(leftLines[row].value)
+				}
 			}
+			line.WriteString(theme.ClampLine(left, layout.HeaderLeftWidth))
 		}
+		line.WriteString(strings.Repeat(" ", layout.HeaderGap))
+		if layout.ShortcutWidth > 0 {
+			right := ""
+			if row < len(rightLines) {
+				right = rightLines[row]
+			}
+			line.WriteString(theme.ClampLine(right, layout.ShortcutWidth))
+		}
+		rows = append(rows, theme.ClampLine(line.String(), layout.Width))
 	}
-	return result
+	return rows
 }
 
-func headerMetadata(header HeaderModel) string {
-	var parts []string
+func buildHeaderLines(header HeaderModel) []headerLine {
+	var lines []headerLine
 	if raw := strings.TrimSpace(header.Origin); raw != "" {
 		if parsed, err := url.Parse(raw); err == nil && parsed.Scheme != "" && parsed.Host != "" {
-			parts = append(parts, parsed.Scheme+"://"+parsed.Host)
+			lines = append(lines, headerLine{value: SanitizeCell(parsed.Scheme + "://" + parsed.Host), kind: headerServer})
 		}
 	}
+
+	identity := SanitizeCell(header.Service)
+	if header.Page != "" {
+		if identity != "" {
+			identity += " — "
+		}
+		identity += SanitizeCell(header.Page)
+	}
+	if identity != "" {
+		lines = append(lines, headerLine{value: identity, kind: headerIdentity})
+	}
+
+	var status []string
 	if header.Authenticated {
-		parts = append(parts, "authenticated")
+		status = append(status, "authenticated")
 	} else {
-		parts = append(parts, "anonymous")
+		status = append(status, "anonymous")
 	}
 	if header.Scope != "" {
-		parts = append(parts, SanitizeCell(header.Scope))
+		status = append(status, SanitizeCell(header.Scope))
 	}
 	if header.Refreshing {
-		parts = append(parts, "refreshing…")
+		status = append(status, "refreshing…")
 	} else if !header.LastSuccess.IsZero() {
 		now := header.Now
 		if now.IsZero() {
 			now = time.Now()
 		}
 		age := max(time.Duration(0), now.Sub(header.LastSuccess)).Round(time.Second)
-		parts = append(parts, "refreshed "+age.String()+" ago")
+		status = append(status, "refreshed "+age.String()+" ago")
 	}
-	return strings.Join(parts, " · ")
+	if len(status) > 0 {
+		lines = append(lines, headerLine{value: strings.Join(status, " · "), kind: headerStatus})
+	}
+	return lines
+}
+
+func headerLineValues(lines []headerLine) []string {
+	values := make([]string, 0, len(lines))
+	for _, line := range lines {
+		values = append(values, line.value)
+	}
+	return values
 }

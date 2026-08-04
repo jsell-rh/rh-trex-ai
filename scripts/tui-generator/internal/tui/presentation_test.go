@@ -11,7 +11,7 @@ import (
 func TestContinuousLayoutNeverProducesNegativeDimensions(t *testing.T) {
 	shortcuts := DefaultKeyRegistry().Shortcuts([]BindingID{KeyHelp, KeyCommand, KeyFilter, KeyCancel}, nil)
 	for _, size := range [][2]int{{120, 40}, {48, 12}, {8, 4}, {1, 1}, {0, 0}, {-5, -2}} {
-		layout := CalculateShellLayout(size[0], size[1], true, "metadata", shortcuts)
+		layout := CalculateShellLayout(size[0], size[1], true, []string{"server", "service", "status"}, shortcuts)
 		values := []int{layout.Width, layout.Height, layout.HeaderRows, layout.CommandRows, layout.PageRows, layout.BreadcrumbRows, layout.AlertRows, layout.ContentWidth, layout.ContentHeight}
 		for _, value := range values {
 			if value < 0 {
@@ -68,14 +68,19 @@ func TestShortcutPaletteUsesRegistryOrderAndResponsivePriority(t *testing.T) {
 		t.Fatalf("palette rendered shortcuts without room for Help: %#v", tooNarrow)
 	}
 
-	aligned := LayoutShortcutPalette([]ShortcutHint{
+	alignedPalette := LayoutShortcutPalette([]ShortcutHint{
 		{Key: "a", Description: "one", Order: 1},
 		{Key: "bb", Description: "two", Order: 2},
 		{Key: "c", Description: "three", Order: 3},
 		{Key: "dd", Description: "four", Order: 4},
-	}, 80, 2).Render(PlainTheme(), 80)
+	}, 80, 2)
+	aligned := alignedPalette.Render(PlainTheme(), 80)
 	if len(aligned) != 2 || strings.Index(aligned[0], "<c>") != strings.Index(aligned[1], "<dd>") {
 		t.Fatalf("shortcut columns are not aligned: %q", aligned)
+	}
+	if alignedPalette.ColumnWidth() != len("<dd> four") ||
+		!strings.HasSuffix(strings.TrimRight(aligned[0], " "), "<c> three") {
+		t.Fatalf("shortcut columns are not equal-width and right-aligned: %#v %q", alignedPalette, aligned)
 	}
 
 	restored := LayoutShortcutPalette(shortcuts, 80, maxShortcutRows)
@@ -97,14 +102,18 @@ func TestShellRendersShortcutsOnlyInTopHeader(t *testing.T) {
 		PageActions: []LocalAction{{Label: "archive", Hotkey: "x"}},
 	}
 	view := ShellView{
-		Header: HeaderModel{Service: "Inventory API", Page: "Items"},
+		Header: HeaderModel{Service: "Inventory API", Page: "Items", Origin: "https://api.example.test", Authenticated: true},
 		Page:   page, Breadcrumb: "Items", HintIDs: []BindingID{KeyHelp, KeyDetail, KeyQuit},
 	}
 	output := shell.Render(view, 48, 12)
 	lines := strings.Split(output, "\n")
-	if len(lines) != 12 || !strings.Contains(strings.Join(lines[:7], "\n"), "<?> help") ||
+	if len(lines) != 12 || !strings.HasPrefix(lines[0], "https://api.example.test") ||
+		!strings.Contains(strings.Join(lines[:6], "\n"), "<?> help") ||
 		!strings.Contains(strings.Join(lines[:7], "\n"), "<x> archive") {
 		t.Fatalf("top shortcut palette missing:\n%s", output)
+	}
+	if !strings.HasSuffix(strings.TrimRight(lines[0], " "), "<q> quit") {
+		t.Fatalf("shortcut palette is not anchored to the upper-right:\n%s", output)
 	}
 	if got := strings.TrimSpace(lines[len(lines)-2]); got != "› Items" {
 		t.Fatalf("breadcrumb row contains duplicate hints: %q\n%s", got, output)

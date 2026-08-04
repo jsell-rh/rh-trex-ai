@@ -14,10 +14,11 @@ const (
 // ShortcutPalette owns all packing and responsive-elision policy for the
 // contextual shortcut area in the shared header.
 type ShortcutPalette struct {
-	shortcuts    []ShortcutHint
-	rows         int
-	columnWidths []int
-	hidden       int
+	shortcuts   []ShortcutHint
+	rows        int
+	columns     int
+	columnWidth int
+	hidden      int
 }
 
 func LayoutShortcutPalette(shortcuts []ShortcutHint, width, maxRows int) ShortcutPalette {
@@ -62,24 +63,29 @@ func LayoutShortcutPalette(shortcuts []ShortcutHint, width, maxRows int) Shortcu
 func packShortcutPalette(shortcuts []ShortcutHint, width, maxRows int) ShortcutPalette {
 	rows := min(maxRows, len(shortcuts))
 	columns := (len(shortcuts) + rows - 1) / rows
-	columnWidths := make([]int, columns)
-	for index, shortcut := range shortcuts {
-		column := index / rows
-		columnWidths[column] = max(columnWidths[column], ansi.StringWidth(shortcut.Text()))
+	columnWidth := 0
+	for _, shortcut := range shortcuts {
+		columnWidth = max(columnWidth, ansi.StringWidth(shortcut.Text()))
 	}
-	total := shortcutGap * max(0, columns-1)
-	for _, columnWidth := range columnWidths {
-		total += columnWidth
-	}
+	total := columns*columnWidth + shortcutGap*max(0, columns-1)
 	if total > width {
 		return ShortcutPalette{}
 	}
-	return ShortcutPalette{shortcuts: append([]ShortcutHint(nil), shortcuts...), rows: rows, columnWidths: columnWidths}
+	return ShortcutPalette{
+		shortcuts: append([]ShortcutHint(nil), shortcuts...),
+		rows:      rows, columns: columns, columnWidth: columnWidth,
+	}
 }
 
 func (palette ShortcutPalette) Rows() int { return palette.rows }
 
 func (palette ShortcutPalette) Hidden() int { return palette.hidden }
+
+func (palette ShortcutPalette) ColumnWidth() int { return palette.columnWidth }
+
+func (palette ShortcutPalette) Width() int {
+	return palette.columns*palette.columnWidth + shortcutGap*max(0, palette.columns-1)
+}
 
 func (palette ShortcutPalette) Shortcuts() []ShortcutHint {
 	return append([]ShortcutHint(nil), palette.shortcuts...)
@@ -92,15 +98,16 @@ func (palette ShortcutPalette) Render(theme Theme, width int) []string {
 	result := make([]string, 0, palette.rows)
 	for row := 0; row < palette.rows; row++ {
 		var line strings.Builder
-		for column, columnWidth := range palette.columnWidths {
+		line.WriteString(strings.Repeat(" ", max(0, width-palette.Width())))
+		for column := 0; column < palette.columns; column++ {
 			index := column*palette.rows + row
 			if index >= len(palette.shortcuts) {
 				break
 			}
 			shortcut := palette.shortcuts[index]
 			line.WriteString(theme.Shortcut(shortcut))
-			if column+1 < len(palette.columnWidths) && index+palette.rows < len(palette.shortcuts) {
-				line.WriteString(strings.Repeat(" ", columnWidth-ansi.StringWidth(shortcut.Text())+shortcutGap))
+			if column+1 < palette.columns && index+palette.rows < len(palette.shortcuts) {
+				line.WriteString(strings.Repeat(" ", palette.columnWidth-ansi.StringWidth(shortcut.Text())+shortcutGap))
 			}
 		}
 		result = append(result, theme.ClampLine(line.String(), width))

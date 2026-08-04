@@ -1197,7 +1197,7 @@ func (model *Model) pageContentSize() (int, int) {
 	model.ensurePresentation()
 	view := model.currentView()
 	if view == nil {
-		layout := CalculateShellLayout(model.width, model.height, false, "", nil)
+		layout := CalculateShellLayout(model.width, model.height, false, nil, nil)
 		return layout.ContentWidth, layout.ContentHeight
 	}
 	command := ""
