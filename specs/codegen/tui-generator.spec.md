@@ -22,8 +22,52 @@ resolved OpenAPI -> canonical IR -> TUI descriptors -> generic runtime
 |-----------|----------------|
 | Canonical IR | Owns OpenAPI loading, operation and schema fidelity, resource views, relationships, capabilities, security state, and source diagnostics |
 | TUI projection | Validates presentation metadata and produces deterministic view, operation, relationship, binding, and authentication descriptors |
-| Generic runtime | Renders tables and details, executes descriptor-defined requests, manages filtering and the navigation stack, and sanitizes terminal content |
+| Generic runtime | Composes reusable pages and presentation components, executes descriptor-defined requests, manages filtering and the navigation stack, and sanitizes terminal content |
 | Generated module | Packages the descriptors, runtime, entry point, pinned dependencies, and tests as a standalone Go module under `generated/tui` |
+
+## Presentation Principles
+
+| Principle | Contract |
+|-----------|----------|
+| Service-neutral identity | Chrome SHALL derive identity and connection context from OpenAPI and runtime configuration and SHALL contain no TRex- or resource-specific branding |
+| One application shell | Header, command bar, page frame, breadcrumb footer, alert rail, modal host, sizing, and focus coordination SHALL each have one shared implementation |
+| Semantic composition | Pages SHALL describe content and local actions by composing shared components; they SHALL NOT recreate chrome, dialogs, alerts, key handling, or styles |
+| One source of presentation truth | Theme tokens, layout breakpoints, global keybindings, hints, alert policy, and dialog behavior SHALL each be defined centrally |
+| Capability-derived interaction | Controls and forms SHALL be produced from canonical operation descriptors and SHALL NOT be added for a literal resource name |
+| Responsive degradation | Constrained terminals SHALL omit lower-priority information before navigation, active context, or alert visibility |
+| Spatially stable errors | Every error SHALL have a sanitized summary in one bottom-anchored alert rail whose terminal row does not move between pages or interaction modes |
+| Safe rendering boundary | All presentation components SHALL sanitize untrusted metadata and response content at the final rendering boundary |
+| Deterministic output | The same descriptors, state, terminal size, and theme SHALL produce the same visible component tree and generated source |
+
+## Reusable Presentation Architecture
+
+The generic runtime SHALL compose screens through the following shell. The alert rail is the final terminal row and SHALL remain visible beneath page content, command input, and modal overlays.
+
+```text
++ Header: service | server | auth | scope | refresh | contextual hints +
++ Command/filter bar (conditional)                                  +
++ Page frame: kind(scope)[count] -----------------------------------+
+| active list, detail, stream, loading, empty, or fatal page         |
++ Breadcrumb/footer: actual navigation stack + global hints --------+
++ Alert rail: fixed bottom row; info | success | warning | error ----+
+             modal host overlays only the page frame
+```
+
+| Component | Responsibility |
+|-----------|----------------|
+| Application shell | Owns full-screen layout, focus, sizing, component placement, and page/modal composition |
+| Header | Renders service-neutral identity, connection, authentication, scope, refresh, and contextual action state |
+| Command/filter bar | Provides the shared `:` command and `/` filter input surface and returns its space to the page when inactive |
+| Page frame | Provides the shared title, border, loading, empty, forbidden, stale, and terminal-too-small presentation around active page content |
+| Resource table page | Renders descriptor-defined lists through one reusable selectable, sortable, filterable table component |
+| Detail page | Renders readable fields through one reusable scrollable key-value component |
+| Stream page | Renders bounded event output and stream state through one reusable viewport component |
+| Breadcrumb/footer | Renders the actual navigation stack and globally applicable hints |
+| Alert manager and rail | Applies one severity, lifetime, redaction, queuing, and fixed-location policy to every alert and error |
+| Modal host | Owns overlay placement and focus for at most one help, choice, confirmation, or form dialog |
+| Dialog primitives | Provide shared frame, buttons, focus order, cancellation, validation, and in-flight behavior |
+| Theme and layout | Provide semantic styles and deterministic full, compact, and terminal-too-small measurements |
+| Keybinding registry | Drives dispatch, reserved-key validation, contextual hints, and help from one definition |
 
 ## Requirements
 
@@ -59,6 +103,189 @@ The generator SHALL produce a standalone Go module at `generated/tui` with its o
 - WHEN the generated directory is copied to an isolated temporary directory and its documented build command is run
 - THEN the executable SHALL build successfully
 - AND the build SHALL NOT require API-server source code, a database, or a running TRex service
+
+### Requirement: Full-Screen Application Shell
+
+The generated TUI SHALL run as a Bubble Tea alternate-screen application whose shared application shell owns all fixed presentation regions. In order from top to bottom, those regions SHALL be the header, conditional command or filter bar, page frame, breadcrumb footer, and alert rail. Opening or closing the command bar SHALL resize only the page frame. A page SHALL NOT render a second header, footer, alert area, or outer frame.
+
+#### Scenario: Move between pages without moving chrome
+
+- GIVEN the user moves from a resource table to detail and then stream pages
+- WHEN each page is rendered at the same terminal size
+- THEN the header, breadcrumb footer, and alert rail SHALL occupy the same terminal rows
+- AND only the content inside the page frame SHALL change
+
+### Requirement: Service-Neutral Header and Semantic Theme
+
+The shared header SHALL display the sanitized OpenAPI title, active server origin, authentication state without credential material, active scope, last successful refresh or current refresh state, and currently applicable action hints when those values are available. It SHALL omit unavailable optional values rather than display invented placeholders. Generated runtime source SHALL contain no TRex-specific logo, service name, resource kind, or color rule.
+
+The runtime SHALL define semantic theme tokens for primary, secondary, normal, muted, success, warning, danger, border, and selected foreground and background presentation. Pages and domain components SHALL use those tokens and SHALL NOT define raw terminal colors or ad hoc Lip Gloss styles.
+
+#### Scenario: Generate for a differently named service
+
+- GIVEN an OpenAPI document is titled `Inventory API` and configures an authenticated HTTPS server
+- WHEN its TUI opens a scoped collection
+- THEN the header SHALL identify Inventory API, the active origin, authenticated state, and current scope
+- AND no TRex name, dinosaur label, or hard-coded service color SHALL appear
+
+### Requirement: Centralized Responsive Layout
+
+One shared layout component SHALL calculate all shell and content dimensions from Bubble Tea window-size messages and deterministic named breakpoints. It SHALL expose full, compact, and terminal-too-small modes to child components. Compact mode SHALL hide optional header metadata, low-priority hints, and low-priority table columns before hiding active page identity, navigation, or the alert rail. Terminal-too-small mode SHALL render one shared explanatory state inside the shell and SHALL NOT panic, produce negative dimensions, or allow a child component to perform independent terminal-size arithmetic.
+
+#### Scenario: Cross responsive boundaries
+
+- GIVEN a populated table and an active persistent error
+- WHEN the terminal crosses the full, compact, terminal-too-small, and compact boundaries
+- THEN the shared layout SHALL deterministically choose the same mode at each boundary
+- AND the error summary SHALL remain on the bottom terminal row in every mode
+- AND returning to compact mode SHALL restore the page without corrupting selection or navigation state
+
+### Requirement: Reusable Presentation Component Architecture
+
+The generated runtime SHALL have exactly one implementation for each shell and presentation primitive named in the Reusable Presentation Architecture. Pages SHALL compose those primitives using semantic data and SHALL NOT draw their own outer borders, create their own theme, implement global key dispatch, position dialogs, or manage alert lifetimes. Resource-specific names, routes, schemas, and operation rules SHALL exist only in generated descriptors and runtime state, not in reusable presentation source.
+
+#### Scenario: Add a page without duplicating presentation policy
+
+- GIVEN a future descriptor introduces a supported page type
+- WHEN that page is implemented
+- THEN it SHALL receive layout, theme, keys, alerts, and modal services from the shared shell
+- AND it SHALL NOT require a copied header, footer, alert, dialog, or style implementation
+
+### Requirement: Unified Page Contract
+
+Every list, detail, stream, loading, empty, forbidden, and fatal page SHALL implement one shared page lifecycle and SHALL provide only semantic page title, scope, count, content, local actions, and state to the application shell. The shell SHALL remain responsible for sizing, chrome, global keys, breadcrumbs, alerts, and modal overlays. Replacing a page SHALL preserve the shell, applicable alerts, navigation stack, and focus policy.
+
+#### Scenario: Replace a loading page with content
+
+- GIVEN a resource page is initially loading and an alert is already visible
+- WHEN the request completes and the table page replaces the loading state
+- THEN the shared shell and alert SHALL remain mounted in the same locations
+- AND the table SHALL receive the page-frame dimensions without recreating chrome
+
+### Requirement: Shared Resource Table Page
+
+All collection views SHALL use one reusable resource-table page backed by the Bubbles table component. It SHALL render the descriptor-derived `kind(scope)[count]` title, full-row selection, active sort and filter state, deterministic adaptive columns, and shared loading, empty, forbidden, and stale-data states. Sorting, filtering, selection restoration by validated identity, and row navigation SHALL be implemented once for every resource descriptor.
+
+#### Scenario: Render unrelated collection schemas
+
+- GIVEN two collection descriptors have different labels, scopes, columns, and identities
+- WHEN the user switches between them
+- THEN the same resource-table component SHALL render both using their descriptors
+- AND neither view SHALL own a duplicated table setup, empty state, sorting function, or selection policy
+
+### Requirement: Shared Detail and Stream Pages
+
+Every item detail SHALL use one reusable scrollable key-value page with deterministic readable-field ordering and shared wrapping or truncation policy. Every streaming operation SHALL use one reusable viewport page with connection state, autoscroll state, and a deterministically bounded event buffer. Detail and stream pages SHALL receive their frame, header, footer, alerts, sizing, and global keys from the shell and SHALL NOT implement alternate chrome.
+
+#### Scenario: Preserve shell while streaming
+
+- GIVEN the user opens a streaming operation and events exceed the viewport and buffer limit
+- WHEN the stream page drops the oldest buffered events and renders the newest safe content
+- THEN the stream's connection and autoscroll state SHALL remain visible inside the page frame
+- AND the header, breadcrumb footer, and alert rail SHALL remain unchanged
+
+### Requirement: Command, Filter, and Help Chrome
+
+The shell SHALL own one bordered command/filter bar for both `:` resource and action commands and `/` table filtering. It SHALL appear only while one of those modes is active, return its rows to the page when closed, and use shared input, completion, validation, cancellation, and history behavior. A shared help dialog SHALL derive its content from the keybinding registry and current page capabilities rather than from separately maintained help text.
+
+#### Scenario: Enter and leave filter mode
+
+- GIVEN a resource table is visible with a persistent error
+- WHEN the user enters `/` filter mode, changes the filter, and presses `Esc`
+- THEN one shared command/filter bar SHALL appear and then close
+- AND the table SHALL regain the released page rows
+- AND the alert SHALL remain on the same bottom row throughout
+
+### Requirement: Single Keybinding and Hint Registry
+
+One keybinding registry SHALL be authoritative for global and local dispatch, contextual hints, help content, reserved-key validation, and conflict diagnostics. Global navigation, command, filter, help, cancellation, quit, confirmation, and focus keys SHALL be declared once. Generated operation hotkeys SHALL be registered through this authority, SHALL NOT override a global binding, and SHALL be shown only while their capability is applicable.
+
+#### Scenario: Keep dispatch, hints, and help aligned
+
+- GIVEN a page supports create and stream actions but not delete
+- WHEN its controls, header hints, footer hints, and help dialog are rendered
+- THEN all four SHALL derive their applicable bindings from the same registry
+- AND no delete binding or stale help entry SHALL be displayed or dispatched
+
+### Requirement: Consistent Alert and Error Rail
+
+The shell SHALL reserve its final terminal row for one shared alert rail on every render, including when no alert is active. Every operational, validation, authentication, network, stream, configuration, and fatal error SHALL produce a sanitized and credential-redacted summary in that rail. Field validation SHALL additionally appear beside its field, recoverable failures SHALL preserve and mark stale content, and fatal startup or configuration failures SHALL additionally render the shared fatal page; those secondary presentations SHALL NOT replace or move the rail summary. Ordinary errors SHALL NOT open a modal.
+
+Alerts SHALL have semantic info, success, warning, and error severities. Info and success alerts SHALL expire after five seconds. Warning and error alerts SHALL persist until explicit dismissal or a successful retry or relevant corrective action. A lower-severity alert SHALL NOT displace a persistent higher-severity alert; queued alerts SHALL be ordered deterministically. The rail SHALL truncate or summarize within its fixed row using the shared layout policy while retaining full safe details in alert state for a shared detail presentation.
+
+#### Scenario: Error location remains constant
+
+- GIVEN a request fails while a table is visible
+- WHEN the user opens a dialog, enters command mode, navigates to detail, and resizes the terminal
+- THEN the error summary SHALL remain in the final terminal row at every supported size
+- AND the stale table or detail content SHALL remain available
+- AND no page or dialog SHALL render a competing error location
+
+#### Scenario: Inline validation also reaches the rail
+
+- GIVEN a required form field is empty
+- WHEN the user submits the form
+- THEN the field SHALL display its inline validation message
+- AND the shared alert rail SHALL display one summary of the validation failure in its fixed location
+- AND no request SHALL be sent
+
+### Requirement: Shared Dialog Host and Dialog Primitives
+
+One modal host SHALL display at most one centered help, choice, confirmation, or form dialog over the page frame without covering or relocating the breadcrumb footer or alert rail. All dialogs SHALL use one frame, focus trap, button, cancellation, validation-summary, sizing, and in-flight policy. `Esc` SHALL cancel when cancellation is safe, focus navigation SHALL be consistent, destructive confirmation SHALL initially focus the safe cancel action, and an in-flight operation SHALL not be submitted twice.
+
+#### Scenario: Confirm a destructive operation safely
+
+- GIVEN a delete operation is available for the selected item
+- WHEN its confirmation dialog opens
+- THEN the underlying page and selection SHALL remain visible and unchanged
+- AND cancel SHALL initially hold focus
+- AND the fixed alert rail SHALL remain visible below the overlay
+- AND repeated submit keys SHALL cause at most one HTTP request
+
+### Requirement: Schema-Driven Form Dialog
+
+Create, update, and non-CRUD request input SHALL use one schema-driven form dialog generated from operation parameter and request-body descriptors. Fields SHALL be ordered deterministically, identify required values, use type- and format-appropriate inputs, exclude read-only properties, permit write-only input, constrain enum choices, preserve explicit zero values, and validate before submission. Invalid fields SHALL render inline through the shared field-error component and summarize through the fixed alert rail. Submission SHALL be disabled while invalid or in flight. A supported JSON request body that cannot be represented structurally MAY use a clearly labeled generic raw-JSON field; the runtime SHALL NOT add an operation-specific hand-written form.
+
+#### Scenario: Reuse one form for different operations
+
+- GIVEN create and action operations have different required parameters, enum fields, and writable body properties
+- WHEN each operation opens its input dialog
+- THEN the same form component SHALL render fields from the corresponding descriptor in deterministic order
+- AND read-only fields SHALL be absent
+- AND invalid or duplicate submission SHALL make no request
+
+### Requirement: Refresh and Stale-Data Lifecycle
+
+The generated executable SHALL accept a refresh interval whose default is five seconds and whose value `0` disables polling. Only the active readable page SHALL poll; it SHALL skip a tick while any request for that page is in flight, pause when hidden, and ignore or cancel results that no longer belong to the active navigation frame. Streaming operations SHALL use their stream lifecycle and SHALL NOT be duplicated by a polling loop. An action that changes the active resource SHALL trigger an immediate refresh after success.
+
+The header SHALL show refresh activity and the last successful refresh age. A page SHALL become stale when the elapsed time since its last success exceeds the greater of three configured intervals or fifteen seconds. Refresh failure SHALL preserve existing content, mark it stale, and create a persistent rail error. A subsequent successful refresh SHALL clear the related error without flashing the initial loading page and SHALL restore table selection by validated identity when that row remains present.
+
+#### Scenario: Slow request skips refresh ticks
+
+- GIVEN the default five-second interval and a list request that remains in flight for twelve seconds
+- WHEN two refresh ticks occur before it completes
+- THEN no overlapping list request SHALL start
+- AND the active page SHALL eventually be marked stale with any failure summarized in the fixed alert rail
+- AND a later success SHALL clear that refresh error and preserve selection
+
+#### Scenario: Disable polling
+
+- GIVEN the user configures a refresh interval of `0`
+- WHEN the active page remains open
+- THEN no timer-driven request SHALL be sent
+- AND manual navigation and post-action refreshes SHALL continue to work
+
+### Requirement: Presentation Component Conformance Gate
+
+The generated runtime SHALL have deterministic component tests for the full, compact, and terminal-too-small layouts and for list, detail, stream, loading, empty, forbidden, stale, and fatal pages. Tests SHALL cover every alert severity and lifetime, fixed alert coordinates across page, command, dialog, and resize transitions, shared help, choice, confirmation, and form dialogs, focus order, and selection preservation. A static architecture test SHALL fail if a page defines outer chrome, raw color styles, global key strings, dialog positioning, or alert policy outside its designated shared component. Render assertions SHALL use a fixed terminal size and color profile so they are independent of the host terminal.
+
+#### Scenario: Prove one presentation system
+
+- GIVEN the generated module and its descriptor fixtures
+- WHEN component, `teatest`, and architecture conformance tests run
+- THEN snapshots SHALL prove consistent chrome and responsive behavior for every page and dialog state
+- AND transition tests SHALL prove that every error occupies the same bottom-row coordinates
+- AND the architecture test SHALL reject an intentionally duplicated page-owned presentation policy
 
 ### Requirement: Resource View Graph Projection
 
@@ -179,16 +406,51 @@ A collection view without `x-trex-tui` SHALL remain generatable. The projection 
 - THEN both runs SHALL derive the same label, identity, columns, and default sort
 - AND generated output SHALL be byte-for-byte identical
 
-### Requirement: Reserved Operation Presentation Metadata
+### Requirement: Typed Operation Presentation Metadata
 
-The `x-trex-tui` operation keys `label`, `hotkey`, `confirmation`, and `visibility` are reserved for a future typed action-presentation revision when used on non-collection operations. CG-006 SHALL NOT allow those keys to redefine whether an OpenAPI operation exists or whether the caller is authorized. Until their behavior is specified, the generator SHALL diagnose their use as unsupported rather than silently assigning unstable semantics.
+The non-collection-operation form of `x-trex-tui` MAY contain only the following presentation fields. It SHALL NOT add, remove, hide, authorize, or change the request semantics of an OpenAPI operation. `visibility` remains reserved and unsupported because capability and authorization state are authoritative.
 
-#### Scenario: Reserved action hotkey
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `label` | non-empty string | Human-readable action label |
+| `hotkey` | string matching `[a-z0-9]` or `ctrl-[a-z]` | Preferred local action binding |
+| `confirmation` | object | Requests a confirmation dialog before a non-delete action and customizes confirmation presentation |
+| `confirmation.title` | non-empty string | Static confirmation-dialog title |
+| `confirmation.message` | non-empty string | Static confirmation explanation |
+| `confirmation.destructive` | boolean | Applies destructive styling and safe initial focus |
 
-- GIVEN a non-collection operation declares `x-trex-tui.hotkey`
-- WHEN the current TUI generator validates the operation
-- THEN it SHALL report that the reserved key is not supported by this specification revision
-- AND it SHALL NOT bind the hotkey or change the operation capability
+Presentation strings SHALL be sanitized, SHALL contain no terminal controls, and SHALL be treated as static data without template evaluation. A selected item identity MAY be rendered separately by the runtime after sanitization but SHALL NOT be interpolated as executable template syntax. A hotkey that conflicts with a global key or another simultaneously visible local action SHALL fail generation with both source locations.
+
+Every DELETE operation SHALL require the shared destructive confirmation dialog even when no extension is present. DELETE metadata MAY customize safe title and message text but SHALL NOT disable confirmation or the initially focused cancel action. A non-delete operation SHALL require confirmation when it declares a `confirmation` object.
+
+#### Scenario: Delete always confirms
+
+- GIVEN a DELETE operation has no `x-trex-tui` metadata
+- WHEN the user invokes its generated action
+- THEN the shared destructive confirmation dialog SHALL open
+- AND cancel SHALL initially hold focus
+- AND no request SHALL be sent before explicit confirmation
+
+#### Scenario: Confirm a non-delete action
+
+- GIVEN a POST action declares a static label, valid local hotkey, and non-destructive confirmation metadata
+- WHEN the user invokes it
+- THEN the keybinding registry and shared confirmation dialog SHALL use that presentation metadata
+- AND the extension SHALL NOT change the operation's route, inputs, security, or capability
+
+#### Scenario: Reject a conflicting hotkey
+
+- GIVEN two actions visible on the same page declare the same hotkey
+- WHEN the projection validates their metadata
+- THEN generation SHALL fail with both operation identities and source pointers
+- AND neither binding SHALL silently win
+
+#### Scenario: Reject visibility metadata
+
+- GIVEN a non-collection operation declares `x-trex-tui.visibility`
+- WHEN the projection validates the operation
+- THEN generation SHALL report that the field is unsupported
+- AND the operation's descriptor capability and authorization state SHALL remain unchanged
 
 ### Requirement: Resource Switching, Tables, Filtering, and Detail
 
@@ -210,7 +472,7 @@ The runtime SHALL provide a resource switcher for globally addressable views and
 
 ### Requirement: Capability-Driven Operations
 
-The runtime SHALL derive available list, get, CRUD, non-CRUD action, and streaming controls exclusively from descriptor capabilities backed by canonical IR operations. It SHALL NOT synthesize CRUD controls or invoke an undocumented method. Generic operation labels SHALL derive deterministically from OpenAPI summary and `operationId` until the reserved operation-presentation grammar is specified. Request input controls SHALL honor requiredness, schema types, read-only and write-only semantics, and operation parameters.
+The runtime SHALL derive available list, get, CRUD, non-CRUD action, and streaming controls exclusively from descriptor capabilities backed by canonical IR operations. It SHALL NOT synthesize CRUD controls or invoke an undocumented method. Generic operation labels SHALL derive deterministically from OpenAPI summary and `operationId` when typed operation presentation metadata does not supply a label. Request input controls SHALL honor requiredness, schema types, read-only and write-only semantics, and operation parameters.
 
 #### Scenario: Read-only view with one action
 
@@ -386,8 +648,15 @@ Continuous integration SHALL run the TUI generator against the fully resolved re
 | Binding plans are generated, not guessed at runtime | Exact sources, validation, and serialization can be reviewed and fixture-tested before requests are sent |
 | `x-trex-tui` is presentation-only | Standard OpenAPI remains authoritative for operations, relationships, security, and request semantics |
 | Collection-operation metadata configures a view | One schema may have different global and scoped presentations without becoming different resource kinds |
-| Operation presentation keys are reserved | Labels, hotkeys, confirmations, and visibility need a later security and interaction contract, not ad hoc semantics |
+| Typed operation presentation is capability-bound | Labels, hotkeys, and confirmation presentation can improve a documented action but cannot create, hide, authorize, or rewrite it; visibility remains unsupported |
 | Generic Bubble Tea runtime | A descriptor-driven Elm-style runtime supports consistent tables, input modes, navigation, and `teatest` coverage |
+| Service-neutral shell | OpenAPI identity and runtime connection state make the generated component reusable without carrying TRex-specific branding |
+| Semantic components own presentation policy | One implementation of each page, dialog, alert, state, and chrome primitive prevents resource or operation views from drifting apart |
+| Fixed bottom alert rail | Errors remain spatially predictable across pages, modes, dialogs, and responsive layouts while inline field and fatal context remain available |
+| One keybinding registry | Dispatch, contextual hints, generated hotkeys, conflict validation, and help cannot silently disagree |
+| Central theme and responsive layout | Semantic tokens and one measurement authority eliminate ad hoc styling and conflicting terminal arithmetic |
+| Modal schema-driven forms | Descriptor inputs can share validation, focus, cancellation, and in-flight behavior without operation-specific form code |
+| Five-second skip-on-inflight refresh | Timely defaults avoid overlapping requests; interval `0` permits deliberate opt-out and stale content remains usable on failure |
 | API-only data path | The generated TUI works against documented REST operations and does not couple to a database, Kubernetes, or server internals |
 | Sanitize at the rendering boundary | One mandatory boundary covers metadata, API data, errors, and future render modes without relying on every caller to remember |
 | Standalone generated module | Consumers can build and distribute the TUI independently of the template service |

@@ -1,7 +1,7 @@
 # Reconciliation Checkpoint
 
 **Last Updated:** 2026-08-04
-**Last Run By:** Codex (reconcile skill — API parity and generated TUI implementation)
+**Last Run By:** Codex (reconcile skill — reusable TUI presentation specification)
 
 ---
 
@@ -13,9 +13,9 @@
 | api | 2 | 20 | 20 | 0 | 0 | 100% |
 | data | 2 | 14 | 13 | 1 | 0 | 92.9% |
 | security | 3 | 17 | 17 | 0 | 0 | 100% |
-| codegen | 6 | 72 | 62 | 9 | 1 | 86.1% |
+| codegen | 6 | 86 | 61 | 17 | 8 | 70.9% |
 | standards | 4 | 30 | 30 | 0 | 0 | 100% |
-| **Total** | **21** | **177** | **166** | **10** | **1** | **93.8%** |
+| **Total** | **21** | **191** | **165** | **18** | **8** | **86.4%** |
 
 ## Spec Dependency Order
 
@@ -82,12 +82,26 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-055 | CG-006 | Canonical IR Consumption | closed | minor | `scripts/tui-generator` loads only `scripts/openapi-ir` and projects its normalized document; no independent YAML traversal exists. |
 | GAP-056 | CG-006 | Descriptor-Driven Generic Runtime | closed | minor | OpenAPI resources project to stable descriptors consumed by one resource-agnostic Bubble Tea model with no entity-specific tables or clients. |
 | GAP-057 | CG-006 | Standalone Generated Module | closed | minor | Generation emits a separately buildable Go module with pinned dependencies, embedded descriptors, runtime sources, tests, and a dedicated command. |
+| GAP-078 | CG-006 | Full-Screen Application Shell | partial | major | The runtime uses Bubble Tea's alternate screen and renders a title, breadcrumb, content, hints, and status, but one monolithic `View` concatenates them without a fixed shared shell or stable region ownership. |
+| GAP-079 | CG-006 | Service-Neutral Header and Semantic Theme | partial | minor | The current title is service-neutral and sanitized, and the table has limited Lip Gloss styling, but the header omits origin/auth/scope/refresh context and pages can create ad hoc styles instead of centralized semantic tokens. |
+| GAP-080 | CG-006 | Centralized Responsive Layout | partial | major | Window-size messages resize tables and viewports and columns honor priorities, but there is no shared full/compact/too-small layout authority, deterministic breakpoint contract, or fixed alert row. |
+| GAP-081 | CG-006 | Reusable Presentation Component Architecture | missing | major | Runtime presentation and mode state are concentrated in `internal/tui/model.go`; shell, page, alert, modal, theme, layout, and key components do not yet exist as reusable boundaries. |
+| GAP-082 | CG-006 | Unified Page Contract | missing | major | List, detail, stream, input, and choice modes are branches of one model rather than pages that supply semantic state to a persistent shell. |
+| GAP-083 | CG-006 | Shared Resource Table Page | partial | minor | One generic Bubbles table already renders descriptor-defined resources, filtering, selection restoration, and adaptive columns, but it lacks the shared page title/state/frame contract and centralized sort, stale, forbidden, and empty presentations. |
+| GAP-084 | CG-006 | Shared Detail and Stream Pages | partial | minor | Generic detail and stream content use one viewport and a bounded stream buffer, but they are modes in the root model without reusable page contracts, explicit connection/autoscroll presentation, or shared framing. |
+| GAP-085 | CG-006 | Command, Filter, and Help Chrome | partial | minor | Shared text input supports `:` switching and `/` filtering, but it is concatenated into page output without a framed shell component, history/completion policy, or registry-derived help dialog. |
+| GAP-086 | CG-006 | Single Keybinding and Hint Registry | missing | major | Global and mode-specific key strings, dispatch branches, and static hints are maintained independently; generated action hotkeys and conflict validation are not implemented. |
+| GAP-087 | CG-006 | Consistent Alert and Error Rail | missing | major | A trailing status string currently mixes loading, success, and error text; the runtime has no always-reserved bottom row, severity/lifetime queue, stale-content error policy, or fixed-coordinate conformance tests. |
+| GAP-088 | CG-006 | Shared Dialog Host and Dialog Primitives | missing | major | Relationship and action choices replace page content with a table, while help, confirmation, form-modal, overlay, focus-trap, and common button primitives are absent. |
+| GAP-089 | CG-006 | Schema-Driven Form Dialog | partial | major | The runtime generically prompts for operation parameters and raw JSON bodies and validates types before requests, but it uses sequential root-page input rather than a descriptor-driven modal form with writable properties, enums, required markers, inline field errors, and duplicate-submit protection. |
+| GAP-090 | CG-006 | Refresh and Stale-Data Lifecycle | missing | major | Data loads on navigation or action completion only; there is no configurable five-second polling, skip-on-inflight timer, refresh header state, deterministic staleness, or selection-preserving background refresh. |
+| GAP-091 | CG-006 | Presentation Component Conformance Gate | missing | major | Existing unit and `teatest` coverage exercises navigation, requests, and terminal safety, but no deterministic component snapshots, responsive-state suite, fixed alert-coordinate assertions, focus tests, or static presentation-boundary test exists. |
 | GAP-058 | CG-006 | Resource View Graph Projection | closed | minor | Descriptors retain global/scoped views, explicit and inferred edge provenance, explicit precedence, and diagnostics for ambiguous disconnected views. |
 | GAP-059 | CG-006 | Multi-Parent Views and Navigation Stack | closed | minor | Runtime frames preserve the actual incoming edge, selected identity, bindings, and parent-specific selection across push/pop navigation. |
 | GAP-060 | CG-006 | Deterministic Path-Parameter Binding | closed | major | Link mappings support the complete OpenAPI runtime-expression grammar; inherited and selected-row bindings are deterministic, location-aware, and reject missing or ambiguous values before HTTP. |
 | GAP-061 | CG-006 | Typed Resource Presentation Extension | closed | minor | The `x-trex-tui` grammar validates labels, aliases, identities, sort fields, columns, priorities, scalar readability, and terminal safety with source diagnostics. |
 | GAP-062 | CG-006 | Deterministic Presentation Defaults | closed | minor | Metadata-free resources derive stable labels, identity, readable columns, priority order, and sorting from normalized schemas. |
-| GAP-063 | CG-006 | Reserved Operation Presentation Metadata | closed | minor | Unsupported reserved operation fields are rejected explicitly, preventing accidental semantics before their grammar is specified. |
+| GAP-063 | CG-006 | Typed Operation Presentation Metadata | partial | major | The projector safely rejects operation presentation fields and derives generic labels, but it does not yet validate or project typed labels/hotkeys/confirmations, detect key conflicts, or require shared safe-default confirmation for DELETE. Visibility remains correctly unsupported. |
 | GAP-064 | CG-006 | Resource Switching, Tables, Filtering, and Detail | closed | minor | The generic runtime provides aliases, resource switching, filtering, responsive tables, detail views, relationship choice, breadcrumbs, and Enter/Esc navigation. |
 | GAP-065 | CG-006 | Capability-Driven Operations | closed | major | Only normalized documented operations become controls; generic prompts collect typed path/query/header values and JSON bodies for actions and streams. |
 | GAP-066 | CG-006 | Exact HTTP Request Construction | closed | major | Request tests cover path/query/header collisions, simple/label/matrix styles, form/deep-object serialization, `allowReserved`, JSON validation, status ranges, and no-request failures. |
@@ -116,12 +130,15 @@ Reconciliation MUST proceed in this order to respect dependencies:
 
 Recommended implementation order for the remaining gaps:
 
-1. **CLI operation fidelity:** GAP-010, GAP-012, and GAP-043 — project arbitrary capabilities and scopes and exercise exact requests against a mock server.
-2. **SDK operation/schema fidelity:** GAP-013, GAP-015, GAP-016, and GAP-044 — render arbitrary scoped/action/stream operations and behavior-test all languages.
-3. **Console view fidelity:** GAP-017, GAP-019, and GAP-045 — project scoped views/actions and component-test supported and absent capabilities.
-4. **Independent data gap:** GAP-005 — connect the existing advisory-lock abstraction to migration execution.
+1. **Generated TUI presentation foundation:** GAP-078–082, GAP-086–088 — split the monolithic model into one responsive shell, page contract, semantic theme, key registry, fixed alert rail, and modal host before adding richer views.
+2. **Generated TUI reusable pages and lifecycle:** GAP-063, GAP-083–085, and GAP-089–090 — compose table/detail/stream pages, typed operation metadata, command/help chrome, schema-driven forms, safe confirmation, and refresh through that foundation.
+3. **Generated TUI presentation gates:** GAP-091 — lock component boundaries, responsive snapshots, focus behavior, and fixed alert coordinates before considering the presentation system complete.
+4. **CLI operation fidelity:** GAP-010, GAP-012, and GAP-043 — project arbitrary capabilities and scopes and exercise exact requests against a mock server.
+5. **SDK operation/schema fidelity:** GAP-013, GAP-015, GAP-016, and GAP-044 — render arbitrary scoped/action/stream operations and behavior-test all languages.
+6. **Console view fidelity:** GAP-017, GAP-019, and GAP-045 — project scoped views/actions and component-test supported and absent capabilities.
+7. **Independent data gap:** GAP-005 — connect the existing advisory-lock abstraction to migration execution.
 
-API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. GAP-001–004, GAP-006–009, GAP-020–042, GAP-052–077 remain closed and require no further action.
+API parity, CG-005, STD-003, and STD-004 remain fully covered. The functional generation, graph, request, security, safety, and deterministic-output core of CG-006 is covered; its newly specified reusable presentation system is not. GAP-001–004, GAP-006–009, GAP-020–042, GAP-052–062, and GAP-064–077 remain closed and require no further action.
 
 ## Reconciliation History
 
@@ -141,3 +158,4 @@ API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. GAP-001–00
 | 2026-08-04 | 100% (108/108) | Closed the three STD-003 workflow gaps with read-only PR CI, an API-only trusted commenter, immutable action pins, and offline trust-boundary mutation tests. | Codex |
 | 2026-08-04 | 89.6% (138/154) | Merged the OpenAPI IR and secure pull request automation requirement sets, renumbered the CI gaps to preserve unique identifiers, and retained both implementations. | Codex |
 | 2026-08-04 | 93.8% (166/177) | Closed API/entity-generator parity and all 23 CG-006 requirements with a canonical-IR TUI graph, descriptor-driven runtime, exact HTTP/auth and Link semantics, safe atomic output, deterministic generation, and real-spec acceptance. Reclassified the existing-but-unused migration lock as partial. | Codex |
+| 2026-08-04 | 86.4% (165/191) | Added 14 CG-006 requirements for a service-neutral full-screen shell, reusable pages/components, centralized theme/layout/keys, fixed bottom alert rail, modal forms/dialogs, refresh lifecycle, and presentation conformance gates; promoted operation metadata from reserved to typed and identified 7 partial and 7 missing presentation requirements. | Codex |
