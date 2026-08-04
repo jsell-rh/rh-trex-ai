@@ -614,10 +614,24 @@ func TestActionChooserUsesOnlyDocumentedCapabilities(t *testing.T) {
 	}
 }
 
-func TestAPIErrorIsInlineAndTerminalSafe(t *testing.T) {
+func TestForegroundAPIErrorOpensScrollableSafeDialog(t *testing.T) {
+	var bodyLines []string
+	for index := 0; index < 40; index++ {
+		bodyLines = append(bodyLines, fmt.Sprintf("response line %02d", index))
+	}
+	bodyLines = append(bodyLines, "secret-token", "final response marker")
+	responseData := map[string]any{
+		"kind": "Error", "reason": "Unable to load things", "code": "rh-trex-ai-1", "diagnostics": bodyLines,
+	}
+	responseBytes, err := json.MarshalIndent(responseData, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseBody := string(responseBytes)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("X-Debug-Secret", "response-header-secret")
 		writer.WriteHeader(http.StatusInternalServerError)
-		_, _ = io.WriteString(writer, "safe\x1b]52;c;clipboard\x07 error")
+		_, _ = io.WriteString(writer, responseBody)
 	}))
 	defer server.Close()
 	descriptor := Descriptor{
@@ -625,7 +639,7 @@ func TestAPIErrorIsInlineAndTerminalSafe(t *testing.T) {
 		Views:      []View{{ID: "things", Kind: "collection", Label: "Things", OperationIDs: []string{"listThings"}, ListOperationID: "listThings"}},
 		Operations: []Operation{{ID: "listThings", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/things"}}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}}},
 	}
-	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL})
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL, Token: "secret-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,10 +647,154 @@ func TestAPIErrorIsInlineAndTerminalSafe(t *testing.T) {
 	t.Cleanup(func() { _ = testModel.Quit() })
 	waitForTexts(t, testModel, "Resources", "Things")
 	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForText(t, testModel, "safe error")
-	output := readOutput(t, testModel.Output())
-	if bytes.Contains(output, []byte("clipboard")) || bytes.Contains(output, []byte("\x1b]52")) {
-		t.Fatalf("unsafe error reached output: %q", output)
+	waitForTexts(t, testModel, "Error", "Unable to load things", "rh-trex-ai-1", "Details")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyRight})
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForTexts(t, testModel, "Operation: listThings", "Status: 500 Internal Server Error", "response line 00")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnd})
+	waitForText(t, testModel, "final response marker")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	waitForTexts(t, testModel, "Unable to load things", "Details")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	waitForText(t, testModel, "alert details")
+	if err := testModel.Quit(); err != nil {
+		t.Fatal(err)
+	}
+	final := testModel.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
+	if final.mode != modeBrowse || final.errorDialog != nil || len(final.frames) != 2 {
+		t.Fatalf("error dismissal changed source state: mode=%v dialog=%#v frames=%d", final.mode, final.errorDialog, len(final.frames))
+	}
+	alert, present := final.shell.Alerts.Active()
+	if !present || !strings.Contains(alert.Details, "final response marker") {
+		t.Fatalf("full API error details were not retained: %#v", alert)
+	}
+	rendered := final.View() + alert.Details
+	for _, forbidden := range []string{"secret-token", "response-header-secret"} {
+		if strings.Contains(rendered, forbidden) {
+			t.Fatalf("unsafe API error content %q reached presentation: %q", forbidden, rendered)
+		}
+	}
+}
+
+func TestFailedActionRetainsEditableFormUntilSuccessfulRetry(t *testing.T) {
+	var submittedBodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method {
+		case http.MethodPatch:
+			body, _ := io.ReadAll(request.Body)
+			submittedBodies = append(submittedBodies, string(body))
+			if strings.Contains(string(body), "first") {
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = io.WriteString(writer, `{"kind":"Error","reason":"Name is already used","code":"rh-trex-ai-7"}`)
+				return
+			}
+			writer.WriteHeader(http.StatusNoContent)
+		case http.MethodGet:
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(writer, `{"items":[]}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	confirmation := &Confirmation{Title: "Confirm update", Message: "Update this thing?"}
+	update := Operation{
+		ID: "updateThing", Method: http.MethodPatch, PathParts: []PathPart{{Literal: "/things"}},
+		RequestBody:     &RequestBody{Required: true, ContentType: "application/json", Fields: []InputField{{Name: "name", Type: "string", Required: true}}},
+		SuccessStatuses: []string{"204"}, Capabilities: []string{"update"}, Security: EffectiveSecurity{None: true},
+		Presentation: ActionPresentation{Confirmation: confirmation},
+	}
+	descriptor := Descriptor{
+		Title: "Retry action", Servers: []Server{{URL: server.URL}},
+		Views: []View{{ID: "things", Kind: "collection", Label: "Things", OperationIDs: []string{"listThings", update.ID}, ListOperationID: "listThings"}},
+		Operations: []Operation{
+			{ID: "listThings", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/things"}}, Response: ResponseShape{ItemsPointer: "/items"}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}},
+			update,
+		},
+	}
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activateResource(t, model, "things")
+	_, _ = model.beginActionWithValues(update, nil)
+	if model.mode != modeActionInput || model.form == nil || len(model.form.fields) != 1 {
+		t.Fatalf("initial action form = mode %v form %#v", model.mode, model.form)
+	}
+	model.form.fields[0].input.SetValue("first name")
+	_, command := model.handleFormKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if command != nil || model.mode != modeConfirmation || model.form == nil || !model.form.inFlight {
+		t.Fatalf("confirmation did not retain submitted form: mode %v form %#v command %v", model.mode, model.form, command)
+	}
+	_, _ = model.handleConfirmationKey(tea.KeyMsg{Type: tea.KeyTab})
+	_, command = model.handleConfirmationKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil {
+		t.Fatal("confirmed action did not create a request")
+	}
+	_, _ = model.handleResult(command().(operationResultMsg))
+	if model.mode != modeErrorDialog || model.previousMode != modeActionInput || model.form == nil || model.form.inFlight || model.confirmation != nil {
+		t.Fatalf("failed action workflow = mode %v previous %v form %#v confirmation %#v", model.mode, model.previousMode, model.form, model.confirmation)
+	}
+	if model.form.focus != 0 || model.form.fields[0].input.Value() != "first name" {
+		t.Fatalf("failed action changed form state: focus %d value %q", model.form.focus, model.form.fields[0].input.Value())
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.mode != modeActionInput || model.form == nil {
+		t.Fatalf("default error close did not restore editable form: mode %v form %#v", model.mode, model.form)
+	}
+
+	model.form.fields[0].input.SetValue("second name")
+	_, command = model.handleFormKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if command != nil || model.mode != modeConfirmation || model.confirmation == nil {
+		t.Fatalf("retry did not require confirmation again: mode %v confirmation %#v command %v", model.mode, model.confirmation, command)
+	}
+	_, _ = model.handleConfirmationKey(tea.KeyMsg{Type: tea.KeyTab})
+	_, command = model.handleConfirmationKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil {
+		t.Fatal("confirmed retry did not create a request")
+	}
+	_, refresh := model.handleResult(command().(operationResultMsg))
+	if model.mode != modeBrowse || model.form != nil || model.confirmation != nil || model.actionInFlight || refresh == nil {
+		t.Fatalf("successful retry did not close action workflow: mode %v form %#v confirmation %#v inFlight %v refresh %v", model.mode, model.form, model.confirmation, model.actionInFlight, refresh)
+	}
+	if len(submittedBodies) != 2 || !strings.Contains(submittedBodies[0], "first name") || !strings.Contains(submittedBodies[1], "second name") {
+		t.Fatalf("submitted bodies = %#v", submittedBodies)
+	}
+
+	directUpdate := update
+	directUpdate.Presentation.Confirmation = nil
+	directDescriptor := descriptor
+	directDescriptor.Operations = append([]Operation(nil), descriptor.Operations...)
+	directDescriptor.Operations[1] = directUpdate
+	directModel, err := NewModel(directDescriptor, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activateResource(t, directModel, "things")
+	_, _ = directModel.beginActionWithValues(directUpdate, nil)
+	directModel.form.fields[0].input.SetValue("direct first")
+	_, command = directModel.handleFormKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil || directModel.mode != modeActionInput || directModel.form == nil || !directModel.form.inFlight {
+		t.Fatalf("unconfirmed action did not remain visibly in flight: mode %v form %#v command %v", directModel.mode, directModel.form, command)
+	}
+	_, _ = directModel.handleResult(command().(operationResultMsg))
+	if directModel.mode != modeErrorDialog || directModel.previousMode != modeActionInput || directModel.form == nil || directModel.form.fields[0].input.Value() != "direct first" {
+		t.Fatalf("unconfirmed failure did not retain form: mode %v previous %v form %#v", directModel.mode, directModel.previousMode, directModel.form)
+	}
+	_, _ = directModel.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	directModel.form.fields[0].input.SetValue("direct second")
+	_, command = directModel.handleFormKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil {
+		t.Fatal("unconfirmed retry did not create a request")
+	}
+	_, _ = directModel.handleResult(command().(operationResultMsg))
+	if directModel.mode != modeBrowse || directModel.form != nil || directModel.actionInFlight {
+		t.Fatalf("successful unconfirmed retry retained action workflow: mode %v form %#v inFlight %v", directModel.mode, directModel.form, directModel.actionInFlight)
+	}
+	if len(submittedBodies) != 4 || !strings.Contains(submittedBodies[2], "direct first") || !strings.Contains(submittedBodies[3], "direct second") {
+		t.Fatalf("all submitted bodies = %#v", submittedBodies)
 	}
 }
 

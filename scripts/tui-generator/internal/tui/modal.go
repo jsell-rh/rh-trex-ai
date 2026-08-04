@@ -13,6 +13,7 @@ const (
 	DialogChoice       DialogKind = "choice"
 	DialogConfirmation DialogKind = "confirmation"
 	DialogForm         DialogKind = "form"
+	DialogError        DialogKind = "error"
 )
 
 type Dialog interface {
@@ -20,6 +21,10 @@ type Dialog interface {
 	Title() string
 	Content(Theme) string
 	Footer(Theme) string
+}
+
+type SizedDialog interface {
+	SetSize(width, height int)
 }
 
 type StaticDialog struct {
@@ -48,6 +53,11 @@ func (host ModalHost) Render(base string, width, height int, theme Theme) string
 	if host.dialog == nil || width <= 0 || height <= 0 {
 		return base
 	}
+	horizontalMargin := min(5, max(1, width/10))
+	maxDialogWidth := max(1, width-horizontalMargin*2)
+	if sized, present := host.dialog.(SizedDialog); present {
+		sized.SetSize(max(1, maxDialogWidth-2), max(1, height-2))
+	}
 	content := host.dialog.Content(theme)
 	if footer := host.dialog.Footer(theme); footer != "" {
 		content += "\n\n" + footer
@@ -56,14 +66,15 @@ func (host ModalHost) Render(base string, width, height int, theme Theme) string
 	if host.dialog.Kind() == DialogConfirmation {
 		title = "<" + title + ">"
 	}
-	horizontalMargin := min(5, max(1, width/10))
-	maxDialogWidth := max(1, width-horizontalMargin*2)
 	dialogWidth := min(max(12, ansi.StringWidth(title)+4), maxDialogWidth)
 	for _, line := range strings.Split(content, "\n") {
 		dialogWidth = min(max(dialogWidth, ansi.StringWidth(line)+4), maxDialogWidth)
 	}
 	dialogHeight := min(max(3, strings.Count(content, "\n")+3), height)
 	dialog := theme.Frame(title, PageReady, content, dialogWidth, dialogHeight)
+	if host.dialog.Kind() == DialogError {
+		dialog = theme.ErrorFrame(title, content, dialogWidth, dialogHeight)
+	}
 	return overlayBlock(base, dialog, width, height, theme)
 }
 

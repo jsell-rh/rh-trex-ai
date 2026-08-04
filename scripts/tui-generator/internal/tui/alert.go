@@ -43,7 +43,7 @@ func (manager *AlertManager) Push(key string, severity AlertSeverity, summary st
 	manager.nextID++
 	alert := Alert{ID: manager.nextID, Key: key, Severity: severity, Summary: manager.safe(summary), CreatedAt: manager.now()}
 	if len(details) > 0 {
-		alert.Details = manager.safe(strings.Join(details, "\n"))
+		alert.Details = manager.safeDetails(strings.Join(details, "\n"))
 	}
 	if severity == AlertInfo || severity == AlertSuccess {
 		alert.ExpiresAt = alert.CreatedAt.Add(alertLifetime)
@@ -106,6 +106,10 @@ func (manager *AlertManager) Active() (Alert, bool) {
 }
 
 func (manager *AlertManager) safe(value string) string {
+	return strings.TrimSpace(manager.safeDetails(value))
+}
+
+func (manager *AlertManager) safeDetails(value string) string {
 	value = Sanitize(value)
 	for _, secret := range manager.secrets {
 		if secret != "" {
@@ -113,7 +117,7 @@ func (manager *AlertManager) safe(value string) string {
 		}
 	}
 	value = bearerPattern.ReplaceAllString(value, "Bearer [REDACTED]")
-	return strings.TrimSpace(value)
+	return value
 }
 
 func (manager *AlertManager) ensureClock() {

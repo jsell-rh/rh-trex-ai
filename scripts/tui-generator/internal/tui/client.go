@@ -98,18 +98,18 @@ func (client *Client) Execute(ctx context.Context, operation Operation, input Re
 	}
 	response, err := client.httpClient.Do(request)
 	if err != nil {
-		return Result{}, fmt.Errorf("request %s: %w", operation.ID, err)
+		return Result{}, newAPIError(operation.ID, request, nil, nil, fmt.Errorf("send request: %w", err))
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return Result{}, fmt.Errorf("read %s response: %w", operation.ID, err)
+		return Result{}, newAPIError(operation.ID, request, response, data, fmt.Errorf("read response: %w", err))
 	}
 	if len(data) > maxResponseBytes {
-		return Result{}, fmt.Errorf("response from %s exceeds %d bytes", operation.ID, maxResponseBytes)
+		return Result{}, newAPIError(operation.ID, request, response, data[:maxResponseBytes], fmt.Errorf("response exceeds %d bytes", maxResponseBytes))
 	}
 	if !acceptsStatus(operation.SuccessStatuses, response.StatusCode) {
-		return Result{}, fmt.Errorf("%s returned HTTP %d: %s", operation.ID, response.StatusCode, SanitizeCell(string(data)))
+		return Result{}, newAPIError(operation.ID, request, response, data, nil)
 	}
 	result := Result{
 		Status: response.StatusCode, Headers: response.Header.Clone(),
@@ -121,7 +121,7 @@ func (client *Client) Execute(ctx context.Context, operation Operation, input Re
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	if err := decoder.Decode(&result.Body); err != nil {
-		return Result{}, fmt.Errorf("decode %s response: %w", operation.ID, err)
+		return Result{}, newAPIError(operation.ID, request, response, data, fmt.Errorf("decode response: %w", err))
 	}
 	return result, nil
 }
@@ -133,12 +133,18 @@ func (client *Client) OpenStream(ctx context.Context, operation Operation, input
 	}
 	response, err := client.streamClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("stream %s: %w", operation.ID, err)
+		return nil, newAPIError(operation.ID, request, nil, nil, fmt.Errorf("open stream: %w", err))
 	}
 	if !acceptsStatus(operation.SuccessStatuses, response.StatusCode) {
 		defer response.Body.Close()
-		data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-		return nil, fmt.Errorf("%s returned HTTP %d: %s", operation.ID, response.StatusCode, SanitizeCell(string(data)))
+		data, readErr := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+		if len(data) > maxResponseBytes {
+			return nil, newAPIError(operation.ID, request, response, data[:maxResponseBytes], fmt.Errorf("response exceeds %d bytes", maxResponseBytes))
+		}
+		if readErr != nil {
+			return nil, newAPIError(operation.ID, request, response, data, fmt.Errorf("read response: %w", readErr))
+		}
+		return nil, newAPIError(operation.ID, request, response, data, nil)
 	}
 	return response, nil
 }

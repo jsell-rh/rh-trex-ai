@@ -280,6 +280,10 @@ func (theme Theme) Frame(title string, state PageState, body string, width, heig
 	return theme.frame(label, title != "", body, width, height)
 }
 
+func (theme Theme) ErrorFrame(title, body string, width, height int) string {
+	return theme.frame(theme.Negative(SanitizeCell(title)), strings.TrimSpace(title) != "", body, width, height)
+}
+
 func (theme Theme) ResourceFrame(title PageFrameTitle, state PageState, body string, width, height int) string {
 	return theme.frame(theme.FrameLabel(title, state), title.Kind != "", body, width, height)
 }

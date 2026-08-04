@@ -465,9 +465,11 @@ func (dialog *ConfirmationDialog) Content(theme Theme) string {
 	if dialog.inFlight {
 		affirmative = "Working…"
 	}
-	cancel := theme.DialogButton("Cancel", !dialog.confirmFocus)
-	confirm := theme.DialogButton(affirmative, dialog.confirmFocus)
-	buttons := cancel + "     " + confirm
+	focus := 0
+	if dialog.confirmFocus {
+		focus = 1
+	}
+	buttons := renderDialogButtons(theme, "Cancel", affirmative, focus, 5)
 	contentWidth := max(36, ansi.StringWidth(message), ansi.StringWidth(buttons))
 	return "\n" + centerDialogLine(message, contentWidth) + "\n\n" + centerDialogLine(buttons, contentWidth) + "\n"
 }
@@ -502,4 +504,8 @@ func centerDialogLine(value string, width int) string {
 	left := max(0, (width-valueWidth)/2)
 	right := max(0, width-valueWidth-left)
 	return strings.Repeat(" ", left) + value + strings.Repeat(" ", right)
+}
+
+func renderDialogButtons(theme Theme, left, right string, focus, gap int) string {
+	return theme.DialogButton(left, focus == 0) + strings.Repeat(" ", max(1, gap)) + theme.DialogButton(right, focus == 1)
 }

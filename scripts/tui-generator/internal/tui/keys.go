@@ -30,6 +30,12 @@ const (
 	KeyColumnsRight     BindingID = "columns-right"
 	KeyChoicePrevious   BindingID = "choice-previous"
 	KeyChoiceNext       BindingID = "choice-next"
+	KeyScrollUp         BindingID = "scroll-up"
+	KeyScrollDown       BindingID = "scroll-down"
+	KeyPageUp           BindingID = "page-up"
+	KeyPageDown         BindingID = "page-down"
+	KeyScrollHome       BindingID = "scroll-home"
+	KeyScrollEnd        BindingID = "scroll-end"
 	KeyDismissAlert     BindingID = "dismiss-alert"
 	KeyHistoryPrevious  BindingID = "history-previous"
 	KeyHistoryNext      BindingID = "history-next"
@@ -85,6 +91,12 @@ func DefaultKeyRegistry() KeyRegistry {
 		{KeyColumnsRight, key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "columns right")), false, 130, 65},
 		{KeyChoicePrevious, key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "previous choice")), false, 131, 70},
 		{KeyChoiceNext, key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "next choice")), false, 132, 70},
+		{KeyScrollUp, key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")), false, 133, 70},
+		{KeyScrollDown, key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")), false, 134, 70},
+		{KeyPageUp, key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")), false, 135, 60},
+		{KeyPageDown, key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")), false, 136, 60},
+		{KeyScrollHome, key.NewBinding(key.WithKeys("home", "g"), key.WithHelp("g", "first line")), false, 137, 55},
+		{KeyScrollEnd, key.NewBinding(key.WithKeys("end", "G"), key.WithHelp("G", "last line")), false, 138, 55},
 		{KeyDismissAlert, key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "dismiss alert")), true, 140, 85},
 		{KeyHistoryPrevious, key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "previous history")), false, 150, 60},
 		{KeyHistoryNext, key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "next history")), false, 160, 60},

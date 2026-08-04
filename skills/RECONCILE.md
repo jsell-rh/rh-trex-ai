@@ -1,7 +1,7 @@
 # Reconciliation Checkpoint
 
 **Last Updated:** 2026-08-04
-**Last Run By:** Codex (reconcile skill — ACP detail and raw-code presentation)
+**Last Run By:** Codex (reconcile skill — API error dialog and failed-action retry implementation)
 
 ---
 
@@ -94,11 +94,11 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-084 | CG-006 | Shared Detail and Stream Pages | closed | minor | `DetailStreamComponent` presents ACP-style right-aligned dim keys, two-cell gaps, aligned wrapped bright-white values, resize reflow, and sanitized indented raw JSON with lossless semantic syntax highlighting. |
 | GAP-085 | CG-006 | Command, Filter, and Help Chrome | closed | minor | One fully bordered three-row prompt renders `🦖>` or `🦕/` without a widget-owned duplicate prefix; resource suggestions update inline, cycle deterministically, and accept through Tab, Right, or Ctrl+F while filters retain history. |
 | GAP-086 | CG-006 | Single Keybinding and Hint Registry | closed | major | `KeyRegistry` owns contextual `<r> raw` presentation and dispatch, suppresses it without a selected API object, and reserves `r` against generated operation hotkeys. |
-| GAP-087 | CG-006 | Consistent Alert and Error Rail | closed | major | Initial list/detail reads, navigation, and polling refreshes update data and refresh state silently; explicit action success remains visible through its follow-up read, while errors retain the fixed persistent rail behavior. |
-| GAP-088 | CG-006 | Shared Dialog Host and Dialog Primitives | closed | major | One compact shared confirmation component now renders a centered inset title, safe sanitized question, and semantic Cancel/Delete or Cancel/Confirm buttons without a destructive banner or redundant hint footer; tab and arrow focus remain safe and duplicate submission is blocked. |
-| GAP-089 | CG-006 | Schema-Driven Form Dialog | closed | major | `FormDialog` groups required fields first, measures display cells to align name/type/requiredness/input columns, indents errors beneath their inputs, and renders safe inline diagnostics through the danger semantic style. |
+| GAP-087 | CG-006 | Consistent Alert and Error Rail | closed | major | Foreground API failures open a compact TRex-aware error summary while retaining complete redacted structured details; the fixed rail persists and background refresh failures remain non-disruptive. |
+| GAP-088 | CG-006 | Shared Dialog Host and Dialog Primitives | closed | major | The shared modal host owns compact Close-default error summaries and bounded scrollable details, with centralized buttons, danger styling, resize behavior, and deterministic focus/back transitions. |
+| GAP-089 | CG-006 | Schema-Driven Form Dialog | closed | major | Forms remain visibly locked until response success; failures preserve exact values and focus, return confirmed actions to editing, and require confirmation again before retry. |
 | GAP-090 | CG-006 | Refresh and Stale-Data Lifecycle | closed | major | The generated `--refresh-interval` defaults to five seconds and accepts zero; active readable frames poll without overlap, streams/hidden frames are excluded, late results are ignored, post-action refresh is immediate, and stale/error/selection/last-success state is preserved and recovered. |
-| GAP-091 | CG-006 | Presentation Component Conformance Gate | closed | major | Focused regressions assert table color equality, ACP-style detail alignment and reflow, exact dim/bright-white detail colors, raw JSON token classification, and lossless styled output. |
+| GAP-091 | CG-006 | Presentation Component Conformance Gate | closed | major | Component, `teatest`, generated-runtime, and architecture tests cover TRex/generic errors, safe full details, compact/default focus, scrolling, background non-interruption, and confirmed/unconfirmed failed-action correction through success. |
 | GAP-058 | CG-006 | Resource View Graph Projection | closed | minor | Descriptors retain global/scoped views, explicit and inferred edge provenance, explicit precedence, and diagnostics for ambiguous disconnected views. |
 | GAP-059 | CG-006 | Multi-Parent Views and Navigation Stack | closed | minor | Runtime frames preserve the actual incoming edge, selected identity, bindings, and parent-specific selection across push/pop navigation. |
 | GAP-060 | CG-006 | Deterministic Path-Parameter Binding | closed | major | The shared action-candidate resolver evaluates the same navigable same-schema collection-to-item edge plan used by navigation and carries selected-row values into item forms and requests. |
@@ -115,7 +115,7 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-071 | CG-006 | Graph Conformance Gate | closed | minor | TUI fixtures assert flat/global and multiply scoped views, two explicit parents, explicit-over-inferred precedence, collection-item inference, and ambiguous disconnection. |
 | GAP-072 | CG-006 | Parameter-Binding and Request Gate | closed | major | `httptest` cases exercise standard Link expressions, inherited frames, selected rows, multi-scope routes, styles, collisions, validation, exact bodies/headers/auth, and failure without a request. |
 | GAP-073 | CG-006 | Capability Conformance Gate | closed | minor | A list/update/stream-only fixture and runtime chooser assertions prove documented partial capabilities are retained without inventing create/get/delete controls. |
-| GAP-074 | CG-006 | Runtime Navigation Gate | closed | minor | `teatest` proves the top-level-only catalog, no-request startup/return, scoped child discovery through parent relationships, and the rendered compact safe delete confirmation alongside the existing navigation matrix. |
+| GAP-074 | CG-006 | Runtime Navigation Gate | closed | minor | Generated-runtime acceptance opens compact foreground errors, navigates complete scrollable details, restores source state, and corrects retained failed-action forms before successful retry. |
 | GAP-075 | CG-006 | Terminal Injection Gate | closed | critical | Unit and `teatest` suites inject all specified terminal-control classes through table, detail, breadcrumb, error, and stream contexts and assert safe, idempotent output. |
 | GAP-076 | CG-006 | Deterministic Generation Gate | closed | minor | Two isolated generations compare relative paths, modes, and SHA-256 digests, reject host paths/timestamps, and build/test both standalone modules. |
 | GAP-077 | CG-006 | Repository OpenAPI Acceptance Gate | closed | minor | The real split repository specification generates all 15 CRUD operations into a temporary TUI module that passes tidy, test, and build under `make test-generators`. |
@@ -138,7 +138,7 @@ Recommended implementation order for the remaining gaps:
 3. **Console view fidelity:** GAP-017, GAP-019, and GAP-045 — project scoped views/actions and component-test supported and absent capabilities.
 4. **Independent data gap:** GAP-005 — connect the existing advisory-lock abstraction to migration execution.
 
-API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. The remaining codegen gaps belong to CLI, SDK, and console fidelity, plus the independent migration-lock gap. GAP-001–004, GAP-006–009, GAP-020–042, and GAP-052–094 remain closed and require no further action.
+API parity, CG-005, CG-006, STD-003, and STD-004 remain fully covered. The remaining codegen gaps belong to CLI, SDK, and console fidelity, plus the independent migration-lock gap.
 
 ## Reconciliation History
 
@@ -181,3 +181,6 @@ API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. The remainin
 | 2026-08-04 | 94.3% (183/194) | Closed GAP-079, GAP-083, and GAP-091 by explicitly overriding Bubbles table colors and asserting exact equality between the unselected foreground and selected background, with black selected text. | Codex |
 | 2026-08-04 | 94.3% (183/194) | Refined and verified GAP-084 and GAP-091 so readable detail and raw JSON content use the semantic normal foreground rather than muted secondary text. | Codex |
 | 2026-08-04 | 94.3% (183/194) | Refined and verified GAP-084 and GAP-091 with ACP-style dim right-aligned keys, two-cell value alignment and resize reflow, bright-white values, and lossless semantic JSON syntax highlighting. | Codex |
+| 2026-08-04 | 92.3% (179/194) | Reopened GAP-074, GAP-087, GAP-088, and GAP-091 for automatic foreground API-error dialogs with complete safe structured details, scrolling/resizing, state-preserving dismissal, and non-disruptive background failures. | Codex |
+| 2026-08-04 | 91.8% (178/194) | Refined GAP-087–091 so failed actions retain their editable form, values, and focus until success; confirmed failures return to editing and require confirmation again on retry. | Codex |
+| 2026-08-04 | 94.3% (183/194) | Closed GAP-074, GAP-087–089, and GAP-091 with compact Close-default TRex errors, safe scrollable details, non-disruptive background failures, and confirmed/unconfirmed form correction retained until success. | Codex |

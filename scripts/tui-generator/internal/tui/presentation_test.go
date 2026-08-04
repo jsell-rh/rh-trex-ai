@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -480,6 +482,95 @@ func TestAlertSeverityLifetimePriorityAndRedaction(t *testing.T) {
 	now = now.Add(alertLifetime + time.Second)
 	if _, present := manager.Active(); present {
 		t.Fatalf("transient alerts did not expire: %#v", manager.alerts)
+	}
+}
+
+func TestBackgroundAPIErrorRemainsInRailWithoutStealingFocus(t *testing.T) {
+	model := &Model{mode: modeBrowse, shell: NewShell("secret-token")}
+	body := "  first response line\nlast response line  \n"
+	requestErr := &APIError{
+		OperationID: "listThings", Method: "GET", URL: "https://example.test/things",
+		Status: 503, Body: body,
+	}
+	model.presentRequestError("refresh:1", requestErr, true)
+	if model.mode != modeBrowse || model.errorDialog != nil || model.shell.Modal.Active() {
+		t.Fatalf("background API error stole focus: mode=%v dialog=%#v modal=%v", model.mode, model.errorDialog, model.shell.Modal.Active())
+	}
+	alert, present := model.shell.Alerts.Active()
+	if !present || alert.Severity != AlertError || !strings.HasSuffix(alert.Details, body) {
+		t.Fatalf("background API error did not retain full whitespace: %#v", alert)
+	}
+}
+
+func TestAPIErrorUsesTRexEnvelopeWithSafeGenericFallback(t *testing.T) {
+	request, err := http.NewRequest(http.MethodGet, "https://user:password@example.test/things?token=secret#fragment", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := newAPIError(
+		"listThings", request, &http.Response{StatusCode: http.StatusUnprocessableEntity},
+		[]byte(`{"kind":"Error","reason":"Unable to load things","code":"rh-trex-ai-1"}`), nil,
+	)
+	if envelope.DialogTitle() != "Error" || envelope.DialogMessage() != "Unable to load things" || !strings.Contains(envelope.DialogContext(), "rh-trex-ai-1") {
+		t.Fatalf("TRex envelope presentation = title %q message %q context %q", envelope.DialogTitle(), envelope.DialogMessage(), envelope.DialogContext())
+	}
+	for _, forbidden := range []string{"user", "password", "token=secret", "fragment"} {
+		if strings.Contains(envelope.Details(), forbidden) {
+			t.Fatalf("safe API error URL retained %q: %q", forbidden, envelope.Details())
+		}
+	}
+
+	fallback := newAPIError("listThings", request, &http.Response{StatusCode: http.StatusBadGateway}, []byte("upstream \x1b]52;c;clipboard-owned\x07unavailable"), nil)
+	if fallback.DialogTitle() != "API Error" || !strings.Contains(fallback.DialogMessage(), "HTTP 502 Bad Gateway") || !strings.Contains(fallback.DialogMessage(), "upstream unavailable") {
+		t.Fatalf("generic API error fallback = title %q message %q", fallback.DialogTitle(), fallback.DialogMessage())
+	}
+	if strings.Contains(fallback.DialogMessage()+fallback.Details(), "clipboard-owned") {
+		t.Fatalf("terminal-control payload reached API error presentation: %q", fallback.DialogMessage()+fallback.Details())
+	}
+}
+
+func TestErrorDialogUsesRegistryScrollingAndRestoresPreviousMode(t *testing.T) {
+	model := &Model{mode: modeConfirmation, shell: NewShell("secret-token")}
+	lines := make([]string, 30)
+	for index := range lines {
+		lines[index] = fmt.Sprintf("line %02d", index)
+	}
+	requestErr := &APIError{
+		OperationID: "deleteThing", Method: "DELETE", URL: "https://example.test/things/one",
+		Status: 500, Kind: "Error", Reason: "Unable to delete thing", Code: "rh-trex-ai-1",
+		Body: strings.Join(lines, "\n") + "\nsecret-token\nfinal marker",
+	}
+	model.presentRequestError("request:deleteThing", requestErr, false)
+	if model.mode != modeErrorDialog || model.previousMode != modeConfirmation || model.errorDialog == nil {
+		t.Fatalf("foreground API error did not open over source mode: mode=%v previous=%v dialog=%#v", model.mode, model.previousMode, model.errorDialog)
+	}
+	model.errorDialog.SetSize(24, 8)
+	compact := ansi.Strip(model.errorDialog.Content(PlainTheme()))
+	if !strings.Contains(compact, "Unable to delete thing") || !strings.Contains(compact, "[ Close ]") || !strings.Contains(compact, "Details") || strings.Contains(compact, "line 00") {
+		t.Fatalf("compact error summary is incorrect: %q", compact)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.mode != modeConfirmation || model.errorDialog != nil {
+		t.Fatalf("default close did not restore source mode: mode=%v dialog=%#v", model.mode, model.errorDialog)
+	}
+	model.presentRequestError("request:deleteThing", requestErr, false)
+	model.errorDialog.SetSize(24, 8)
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !model.errorDialog.Expanded() || strings.Contains(ansi.Strip(model.errorDialog.Content(PlainTheme())), "final marker") {
+		t.Fatal("details did not open at the beginning of the full error")
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnd})
+	if !strings.Contains(ansi.Strip(model.errorDialog.Content(PlainTheme())), "final marker") {
+		t.Fatal("error dialog end binding did not make the complete error reachable")
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.mode != modeErrorDialog || model.errorDialog == nil || model.errorDialog.Expanded() {
+		t.Fatalf("details back did not restore compact error: mode=%v dialog=%#v", model.mode, model.errorDialog)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.mode != modeConfirmation || model.errorDialog != nil {
+		t.Fatalf("error dialog dismissal did not restore source mode: mode=%v dialog=%#v", model.mode, model.errorDialog)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,7 @@ const (
 	modeConfirmation
 	modeDetail
 	modeRaw
+	modeErrorDialog
 	modeHelp
 	modeAlertDetails
 )
@@ -100,6 +102,7 @@ type Model struct {
 	actionRequest    RequestInput
 	form             *FormDialog
 	confirmation     *ConfirmationDialog
+	errorDialog      *ErrorDialog
 	actionInFlight   bool
 	shell            Shell
 	refreshInterval  time.Duration
@@ -196,11 +199,22 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.loading = false
 		model.frames[len(model.frames)-1].InFlight = false
 		if typed.err != nil {
+			failedAction := model.actionInFlight
+			if failedAction {
+				model.restoreFailedActionWorkflow()
+			}
 			frame := &model.frames[len(model.frames)-1]
-			frame.LoadFailed = true
-			frame.Stale = !frame.LastSuccess.IsZero()
-			model.alertError("stream", typed.err.Error())
+			if !failedAction {
+				frame.LoadFailed = true
+				frame.Stale = !frame.LastSuccess.IsZero()
+			}
+			model.presentRequestError("stream", typed.err, false)
 			return model, nil
+		}
+		if model.actionInFlight {
+			model.actionInFlight = false
+			model.form = nil
+			model.confirmation = nil
 		}
 		model.streamEvents = typed.events
 		model.streamLines = nil
@@ -223,7 +237,7 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			frame := &model.frames[len(model.frames)-1]
 			frame.LoadFailed = true
 			frame.Stale = !frame.LastSuccess.IsZero()
-			model.alertError("stream", typed.event.err.Error())
+			model.presentRequestError("stream", typed.event.err, false)
 			model.streamEvents = nil
 			model.streamCancel = nil
 			model.connected = false
@@ -251,6 +265,9 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.detail, command = model.detail.Update(message)
 		return model, command
 	}
+	if model.mode == modeErrorDialog && model.errorDialog != nil {
+		return model.handleErrorDialogMessage(message)
+	}
 	return model, nil
 }
 
@@ -277,6 +294,10 @@ func (model *Model) View() string {
 	case modeConfirmation:
 		if model.confirmation != nil {
 			model.shell.Modal.Open(model.confirmation)
+		}
+	case modeErrorDialog:
+		if model.errorDialog != nil {
+			model.shell.Modal.Open(model.errorDialog)
 		}
 	case modeHelp:
 		model.shell.Modal.Open(StaticDialog{DialogKind: DialogHelp, DialogTitle: "Help", DialogContent: model.helpContent(*view), DialogFooter: model.shell.Keys.Hints(KeyCancel)})
@@ -360,6 +381,12 @@ func (model *Model) applicableKeysForMode(activeMode mode) []BindingID {
 		keys = []BindingID{KeyCancel, KeyHelp, KeyForceQuit}
 	case modeAlertDetails:
 		keys = []BindingID{KeyCancel, KeyHelp, KeyDismissAlert, KeyForceQuit}
+	case modeErrorDialog:
+		if model.errorDialog != nil && model.errorDialog.Expanded() {
+			keys = []BindingID{KeyScrollUp, KeyScrollDown, KeyPageUp, KeyPageDown, KeyScrollHome, KeyScrollEnd, KeyCancel, KeyForceQuit}
+		} else {
+			keys = []BindingID{KeyChoicePrevious, KeyChoiceNext, KeyNextFocus, KeyPreviousFocus, KeySubmit, KeyCancel, KeyForceQuit}
+		}
 	case modeFilter, modeSwitch:
 		keys = []BindingID{KeySubmit, KeyCancel, KeyHelp, KeyForceQuit}
 		if activeMode == modeSwitch {
@@ -382,7 +409,7 @@ func (model *Model) applicableKeysForMode(activeMode mode) []BindingID {
 	default:
 		keys = []BindingID{KeyCommand, KeyFilter, KeyNavigate, KeyDetail, KeyActions, KeySortNext, KeySortDirection, KeyCancel, KeyHelp, KeyQuit}
 	}
-	if activeMode != modeHelp && activeMode != modeAlertDetails {
+	if activeMode != modeHelp && activeMode != modeAlertDetails && activeMode != modeErrorDialog {
 		if _, present := model.shell.Alerts.Active(); present {
 			keys = append(keys, KeyAlertDetails, KeyDismissAlert)
 		}
@@ -471,6 +498,9 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if model.shell.Keys.Matches(key, KeyForceQuit) || (model.shell.Keys.Matches(key, KeyQuit) && (model.mode == modeCatalog || model.mode == modeBrowse || model.mode == modeDetail || model.mode == modeRaw)) {
 		model.cancelStream()
 		return model, tea.Quit
+	}
+	if model.mode == modeErrorDialog {
+		return model.handleErrorDialogMessage(key)
 	}
 	if model.mode == modeHelp || model.mode == modeAlertDetails {
 		if model.mode == modeAlertDetails && model.shell.Keys.Matches(key, KeyDismissAlert) {
@@ -910,9 +940,13 @@ func (model *Model) prepareActionSubmission(request RequestInput) (tea.Model, te
 		model.mode = modeConfirmation
 		return model, nil
 	}
-	model.mode = modeBrowse
-	model.shell.Modal.Close()
 	model.actionInFlight = true
+	if model.form != nil && len(model.form.fields) > 0 {
+		model.mode = modeActionInput
+	} else {
+		model.mode = modeBrowse
+		model.shell.Modal.Close()
+	}
 	return model, model.executeAction(model.actionOperation, request)
 }
 
@@ -1088,20 +1122,19 @@ func (model *Model) handleResult(message operationResultMsg) (tea.Model, tea.Cmd
 	model.loading = false
 	frame.Refreshing = false
 	if message.err != nil {
-		model.actionInFlight = false
-		if model.form != nil {
-			model.form.inFlight = false
-		}
-		if model.confirmation != nil {
-			model.confirmation.inFlight = false
+		failedAction := model.actionInFlight
+		if failedAction {
+			model.restoreFailedActionWorkflow()
+			model.presentRequestError("request:"+message.operationID, message.err, false)
+			return model, nil
 		}
 		frame.Forbidden = strings.Contains(message.err.Error(), "HTTP 401") || strings.Contains(message.err.Error(), "HTTP 403")
 		frame.LoadFailed = !message.background && len(model.rows) == 0 && frame.Selected == nil
 		if message.background || !frame.LastSuccess.IsZero() {
 			frame.Stale = true
-			model.alertError(model.refreshAlertKey(frame.ID), message.err.Error())
+			model.presentRequestError(model.refreshAlertKey(frame.ID), message.err, message.background)
 		} else {
-			model.alertError("request:"+message.operationID, message.err.Error())
+			model.presentRequestError("request:"+message.operationID, message.err, false)
 		}
 		return model, nil
 	}
@@ -1751,6 +1784,54 @@ func (model *Model) alertWarning(key, summary string) {
 func (model *Model) alertError(key, summary string) {
 	model.ensurePresentation()
 	model.shell.Alerts.Push(key, AlertError, summary)
+}
+
+func (model *Model) presentRequestError(key string, requestErr error, background bool) {
+	model.ensurePresentation()
+	var apiError *APIError
+	if !errors.As(requestErr, &apiError) {
+		model.shell.Alerts.Push(key, AlertError, requestErr.Error())
+		return
+	}
+	alert := model.shell.Alerts.Push(key, AlertError, apiError.Error(), apiError.Details())
+	if background {
+		return
+	}
+	model.previousMode = model.mode
+	model.errorDialog = NewErrorDialog(apiError.DialogTitle(), apiError.DialogMessage(), apiError.DialogContext(), alert, model.shell.Keys)
+	model.mode = modeErrorDialog
+}
+
+func (model *Model) handleErrorDialogMessage(message tea.Msg) (tea.Model, tea.Cmd) {
+	if model.errorDialog == nil {
+		return model, nil
+	}
+	closeDialog, command := model.errorDialog.Update(message)
+	if closeDialog {
+		model.mode = model.previousMode
+		model.errorDialog = nil
+		model.shell.Modal.Close()
+	}
+	return model, command
+}
+
+func (model *Model) restoreFailedActionWorkflow() {
+	model.actionInFlight = false
+	if model.form != nil {
+		model.form.inFlight = false
+		if len(model.form.fields) > 0 {
+			model.confirmation = nil
+			model.mode = modeActionInput
+			return
+		}
+	}
+	if model.confirmation != nil {
+		model.confirmation.inFlight = false
+		model.mode = modeConfirmation
+		return
+	}
+	model.mode = modeBrowse
+	model.shell.Modal.Close()
 }
 
 func availableBindings(frames []Frame) map[string]any {
