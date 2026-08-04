@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,6 +59,7 @@ func projectDocument(document *ir.Document) (tui.Descriptor, error) {
 	projector.projectRelationships()
 	projector.projectCollectionItemEdges()
 	projector.applyExplicitPrecedence()
+	projector.validateOperationHotkeyConflicts()
 	projector.validateAliases()
 	projector.recordUnaddressableScopes()
 	projector.finish()
@@ -479,15 +481,28 @@ func (projector *projection) projectOperationPresentation() {
 			projected.Presentation.Confirmation.Destructive = true
 		}
 	}
-	projector.validateOperationHotkeyConflicts()
 }
 
 func (projector *projection) validateOperationHotkeyConflicts() {
 	for _, view := range projector.descriptor.Views {
 		owners := make(map[string]*tui.Operation)
-		for _, operationID := range view.OperationIDs {
+		seenOperations := make(map[string]bool)
+		operationIDs := append([]string(nil), view.OperationIDs...)
+		if view.Kind == "collection" {
+			for _, edge := range projector.descriptor.Outgoing(view.ID) {
+				target := projector.views[edge.TargetViewID]
+				if target != nil && target.Kind == "item" && target.SchemaRef == view.SchemaRef {
+					operationIDs = append(operationIDs, target.OperationIDs...)
+				}
+			}
+		}
+		for _, operationID := range operationIDs {
+			if seenOperations[operationID] {
+				continue
+			}
+			seenOperations[operationID] = true
 			operation := projector.operations[operationID]
-			if operation == nil || operation.Presentation.Hotkey == "" {
+			if operation == nil || operation.Presentation.Hotkey == "" || slices.Contains(operation.Capabilities, "list") || slices.Contains(operation.Capabilities, "get") {
 				continue
 			}
 			hotkey := operation.Presentation.Hotkey

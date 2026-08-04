@@ -328,6 +328,91 @@ func TestGenericActionInputsExecuteDocumentedRequest(t *testing.T) {
 	}
 }
 
+func TestCollectionActionsIncludeAndBindHighlightedItemOperations(t *testing.T) {
+	descriptor := highlightedItemActionDescriptor("http://localhost:8000")
+	model, err := NewModel(descriptor, ClientConfig{BaseURL: "http://localhost:8000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activateResource(t, model, "dinosaurs")
+	view := descriptor.View("dinosaurs")
+	model.setRows(*view, nil)
+	if got := actionOperationIDs(model.operationsForCurrentView()); !reflect.DeepEqual(got, []string{"createDinosaur"}) {
+		t.Fatalf("actions without a selected row = %v", got)
+	}
+
+	model.setRows(*view, []map[string]any{{"id": "dinosaur/7", "species": "Raptor"}})
+	if got := actionOperationIDs(model.operationsForCurrentView()); !reflect.DeepEqual(got, []string{"createDinosaur", "deleteDinosaur", "updateDinosaur"}) {
+		t.Fatalf("actions for highlighted row = %v", got)
+	}
+	if actions := model.localActions(*view); len(actions) != 1 || actions[0].Hotkey != "x" || actions[0].Label != "Update a dinosaur" {
+		t.Fatalf("highlighted-item local actions = %#v", actions)
+	}
+	_, _ = model.openActions()
+	if chooser := model.chooser.View(); !strings.Contains(chooser, "Create a new dinosaur") || !strings.Contains(chooser, "Delete a dinosaur") || !strings.Contains(chooser, "Update a dinosaur") {
+		t.Fatalf("highlighted-item action chooser = %q; rows %#v", chooser, model.chooser.Rows())
+	}
+	updateIndex := -1
+	for index, operation := range model.chosenOperations {
+		if operation.ID == "updateDinosaur" {
+			updateIndex = index
+			break
+		}
+	}
+	if updateIndex < 0 || model.chosenValues[updateIndex]["id"] != "dinosaur/7" {
+		t.Fatalf("selected-item action bindings = %#v", model.chosenValues)
+	}
+	_, _ = model.beginActionWithValues(model.chosenOperations[updateIndex], model.chosenValues[updateIndex])
+	if model.form == nil || len(model.form.fields) != 1 || model.form.fields[0].descriptor.Name != "species" || model.form.fields[0].descriptor.Location != "body" {
+		t.Fatalf("pre-bound item form fields = %#v", model.form)
+	}
+}
+
+func TestHighlightedItemActionUsesExactBoundPathWithTeatest(t *testing.T) {
+	actionRequests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.Method == http.MethodPatch {
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			actionRequests <- request.URL.EscapedPath() + "|" + string(body)
+			_, _ = io.WriteString(writer, `{"id":"dinosaur/7","species":"Raptor"}`)
+			return
+		}
+		_, _ = io.WriteString(writer, `{"items":[{"id":"dinosaur/7","species":"Tyrannosaurus"}]}`)
+	}))
+	defer server.Close()
+
+	model, err := NewModel(highlightedItemActionDescriptor(server.URL), ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testModel := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(110, 30))
+	t.Cleanup(func() { _ = testModel.Quit() })
+	waitForText(t, testModel, "Resources(all)[1]")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "Tyrannosaurus")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	waitForTexts(t, testModel, "Create a new dinosaur", "Delete a dinosaur", "Update a dinosaur")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyDown})
+	testModel.Send(tea.KeyMsg{Type: tea.KeyDown})
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "species  string  required")
+	testModel.Type("Raptor")
+	testModel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, testModel, "Operation completed")
+	select {
+	case request := <-actionRequests:
+		if request != `/dinosaurs/dinosaur%2F7|{"species":"Raptor"}` {
+			t.Fatalf("selected-item action request = %q", request)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("selected-item action request was not received")
+	}
+}
+
 func TestRoutineReadsRemainSilentAndPostActionRefreshPreservesSuccess(t *testing.T) {
 	descriptor := Descriptor{
 		Title: "Silent reads", Servers: []Server{{URL: "http://localhost:9001"}},
@@ -963,6 +1048,48 @@ func activateResource(t *testing.T, model *Model, viewID string) {
 	model.mode = modeBrowse
 	model.filter = ""
 	model.rebuildTable(*view)
+}
+
+func actionOperationIDs(operations []Operation) []string {
+	result := make([]string, 0, len(operations))
+	for _, operation := range operations {
+		result = append(result, operation.ID)
+	}
+	return result
+}
+
+func highlightedItemActionDescriptor(server string) Descriptor {
+	itemParameter := Parameter{Name: "id", In: "path", Required: true, Style: "simple", Type: "string"}
+	body := &RequestBody{
+		Required: true, ContentType: "application/json",
+		Fields: []InputField{{Name: "species", Type: "string", Required: true}},
+	}
+	return Descriptor{
+		Title: "Highlighted item actions", Servers: []Server{{URL: server}},
+		Views: []View{
+			{
+				ID: "dinosaurs", Kind: "collection", Label: "Dinosaur", IdentityProperty: "id", DefaultSort: "species",
+				Columns:      []Column{{Property: "species", Label: "SPECIES"}, {Property: "id", Label: "ID"}},
+				OperationIDs: []string{"createDinosaur", "listDinosaurs"}, ListOperationID: "listDinosaurs",
+			},
+			{
+				ID: "dinosaur", Kind: "item", Label: "Dinosaur", IdentityProperty: "id",
+				OperationIDs: []string{"deleteDinosaur", "getDinosaur", "updateDinosaur"}, GetOperationID: "getDinosaur",
+			},
+		},
+		Operations: []Operation{
+			{ID: "createDinosaur", Method: http.MethodPost, PathParts: []PathPart{{Literal: "/dinosaurs"}}, RequestBody: body, SuccessStatuses: []string{"201"}, Capabilities: []string{"create"}, Summary: "Create a new dinosaur", Security: EffectiveSecurity{None: true}},
+			{ID: "listDinosaurs", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/dinosaurs"}}, Response: ResponseShape{ItemsPointer: "/items"}, SuccessStatuses: []string{"200"}, Capabilities: []string{"list"}, Security: EffectiveSecurity{None: true}},
+			{ID: "getDinosaur", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/dinosaurs/"}, {Parameter: "id"}}, Parameters: []Parameter{itemParameter}, SuccessStatuses: []string{"200"}, Capabilities: []string{"get"}, Security: EffectiveSecurity{None: true}},
+			{ID: "updateDinosaur", Method: http.MethodPatch, PathParts: []PathPart{{Literal: "/dinosaurs/"}, {Parameter: "id"}}, Parameters: []Parameter{itemParameter}, RequestBody: body, SuccessStatuses: []string{"200"}, Capabilities: []string{"update"}, Summary: "Update a dinosaur", Security: EffectiveSecurity{None: true}, Presentation: ActionPresentation{Hotkey: "x"}},
+			{ID: "deleteDinosaur", Method: http.MethodDelete, PathParts: []PathPart{{Literal: "/dinosaurs/"}, {Parameter: "id"}}, Parameters: []Parameter{itemParameter}, SuccessStatuses: []string{"204"}, Capabilities: []string{"delete"}, Summary: "Delete a dinosaur", Security: EffectiveSecurity{None: true}, Presentation: ActionPresentation{Confirmation: &Confirmation{Title: "Confirm delete", Message: "Delete the dinosaur?", Destructive: true}}},
+		},
+		Edges: []Edge{{
+			ID: "dinosaurs-dinosaur", Name: "details", SourceViewID: "dinosaurs", TargetViewID: "dinosaur",
+			TargetOperationID: "getDinosaur", Provenance: "collection-item", Navigable: true,
+			Bindings: []Binding{{Target: "id", SourceKind: "row-property", Source: "id"}},
+		}},
+	}
 }
 
 func runtimeTestDescriptor(server string) Descriptor {

@@ -23,6 +23,11 @@ type Row struct {
 	Cells    []string
 }
 
+type actionCandidate struct {
+	Operation Operation
+	Values    map[string]any
+}
+
 type Frame struct {
 	ID               uint64
 	Catalog          bool
@@ -88,6 +93,7 @@ type Model struct {
 	loading          bool
 	chosenEdges      []Edge
 	chosenOperations []Operation
+	chosenValues     []map[string]any
 	actionOperation  Operation
 	actionRequest    RequestInput
 	form             *FormDialog
@@ -396,13 +402,16 @@ func (model *Model) helpContent(view View) string {
 
 func (model *Model) localActions(view View) []LocalAction {
 	var result []LocalAction
-	for _, id := range view.OperationIDs {
-		operation := model.descriptor.Operation(id)
-		if operation == nil || operation.Presentation.Hotkey == "" ||
-			containsString(operation.Capabilities, "list") || containsString(operation.Capabilities, "get") {
+	var selected *Row
+	if current := model.currentView(); current != nil && current.ID == view.ID {
+		selected = model.selectedRow()
+	}
+	for _, candidate := range model.actionCandidates(view, selected) {
+		operation := candidate.Operation
+		if operation.Presentation.Hotkey == "" {
 			continue
 		}
-		result = append(result, LocalAction{Label: actionLabel(*operation), Hotkey: operation.Presentation.Hotkey})
+		result = append(result, LocalAction{Label: actionLabel(operation), Hotkey: operation.Presentation.Hotkey})
 	}
 	return result
 }
@@ -563,9 +572,9 @@ func (model *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return model, nil
 	}
-	for _, operation := range model.operationsForCurrentView() {
-		if model.shell.Keys.ActionMatches(key, operation) {
-			return model.beginAction(operation)
+	for _, candidate := range model.actionCandidatesForCurrentView() {
+		if model.shell.Keys.ActionMatches(key, candidate.Operation) {
+			return model.beginActionWithValues(candidate.Operation, candidate.Values)
 		}
 	}
 	var command tea.Cmd
@@ -638,6 +647,9 @@ func (model *Model) handleChooserKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if model.mode == modeActions && index < len(model.chosenOperations) {
 			operation := model.chosenOperations[index]
+			if index < len(model.chosenValues) {
+				return model.beginActionWithValues(operation, model.chosenValues[index])
+			}
 			return model.beginAction(operation)
 		}
 	}
@@ -736,16 +748,18 @@ func (model *Model) openActions() (tea.Model, tea.Cmd) {
 	if view == nil {
 		return model, nil
 	}
-	operations := model.operationsForCurrentView()
-	if len(operations) == 0 {
+	candidates := model.actionCandidatesForCurrentView()
+	if len(candidates) == 0 {
 		model.alertInfo("actions", "No documented actions for this view")
 		return model, nil
 	}
-	sort.Slice(operations, func(i, j int) bool { return operations[i].ID < operations[j].ID })
-	model.chosenOperations = operations
-	rows := make([]table.Row, 0, len(operations))
-	values := cloneBindings(model.frames[len(model.frames)-1].Bindings)
-	for _, operation := range operations {
+	model.chosenOperations = make([]Operation, 0, len(candidates))
+	model.chosenValues = make([]map[string]any, 0, len(candidates))
+	rows := make([]table.Row, 0, len(candidates))
+	for _, candidate := range candidates {
+		operation, values := candidate.Operation, candidate.Values
+		model.chosenOperations = append(model.chosenOperations, operation)
+		model.chosenValues = append(model.chosenValues, cloneBindings(values))
 		label := actionLabel(operation)
 		state := operation.Method
 		if count := actionInputCount(operation, values); count > 0 {
@@ -759,11 +773,24 @@ func (model *Model) openActions() (tea.Model, tea.Cmd) {
 }
 
 func (model *Model) beginAction(operation Operation) (tea.Model, tea.Cmd) {
+	for _, candidate := range model.actionCandidatesForCurrentView() {
+		if candidate.Operation.ID == operation.ID {
+			return model.beginActionWithValues(operation, candidate.Values)
+		}
+	}
+	values := map[string]any{}
+	if len(model.frames) > 0 {
+		values = model.frames[len(model.frames)-1].Bindings
+	}
+	return model.beginActionWithValues(operation, values)
+}
+
+func (model *Model) beginActionWithValues(operation Operation, initialValues map[string]any) (tea.Model, tea.Cmd) {
 	if len(model.frames) > 0 && model.frames[len(model.frames)-1].InFlight {
 		model.alertWarning("action", "Wait for the current request to finish")
 		return model, nil
 	}
-	values := cloneBindings(model.frames[len(model.frames)-1].Bindings)
+	values := cloneBindings(initialValues)
 	for _, parameter := range operation.Parameters {
 		if parameter.In != "path" {
 			continue
@@ -1345,7 +1372,9 @@ func hasCollectionView(descriptor Descriptor) bool {
 }
 
 func newChooser(columns []table.Column, rows []table.Row) table.Model {
-	return table.New(table.WithColumns(columns), table.WithRows(rows), table.WithFocused(true), table.WithHeight(max(3, len(rows))))
+	// Bubbles counts the header inside WithHeight, so reserve one additional
+	// row to make every requested choice visible without an off-by-one clip.
+	return table.New(table.WithColumns(columns), table.WithRows(rows), table.WithFocused(true), table.WithHeight(max(3, len(rows)+1)))
 }
 
 func evaluateBindings(edge Edge, frame Frame, row Row) (map[string]any, error) {
@@ -1616,16 +1645,55 @@ func (model *Model) operationsForCurrentView() []Operation {
 	if view == nil {
 		return nil
 	}
-	var operations []Operation
-	for _, id := range view.OperationIDs {
-		operation := model.descriptor.Operation(id)
-		if operation == nil || containsString(operation.Capabilities, "list") || containsString(operation.Capabilities, "get") {
-			continue
-		}
-		operations = append(operations, *operation)
+	candidates := model.actionCandidates(*view, model.selectedRow())
+	operations := make([]Operation, 0, len(candidates))
+	for _, candidate := range candidates {
+		operations = append(operations, candidate.Operation)
 	}
-	sort.Slice(operations, func(i, j int) bool { return operations[i].ID < operations[j].ID })
 	return operations
+}
+
+func (model *Model) actionCandidatesForCurrentView() []actionCandidate {
+	view := model.currentView()
+	if view == nil {
+		return nil
+	}
+	return model.actionCandidates(*view, model.selectedRow())
+}
+
+func (model *Model) actionCandidates(view View, selected *Row) []actionCandidate {
+	frame := Frame{Bindings: map[string]any{}}
+	if len(model.frames) > 0 {
+		frame = model.frames[len(model.frames)-1]
+	}
+	candidates := make([]actionCandidate, 0)
+	seen := make(map[string]bool)
+	appendView := func(candidateView View, values map[string]any) {
+		for _, id := range candidateView.OperationIDs {
+			operation := model.descriptor.Operation(id)
+			if operation == nil || seen[id] || containsString(operation.Capabilities, "list") || containsString(operation.Capabilities, "get") {
+				continue
+			}
+			seen[id] = true
+			candidates = append(candidates, actionCandidate{Operation: *operation, Values: cloneBindings(values)})
+		}
+	}
+	appendView(view, frame.Bindings)
+	if view.Kind == "collection" && selected != nil {
+		for _, edge := range model.descriptor.Outgoing(view.ID) {
+			target := model.descriptor.View(edge.TargetViewID)
+			if target == nil || target.Kind != "item" || target.SchemaRef != view.SchemaRef {
+				continue
+			}
+			values, err := evaluateBindings(edge, frame, *selected)
+			if err != nil {
+				continue
+			}
+			appendView(*target, values)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Operation.ID < candidates[j].Operation.ID })
+	return candidates
 }
 
 func (model *Model) alertInfo(key, summary string) {

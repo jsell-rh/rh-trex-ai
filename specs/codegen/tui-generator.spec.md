@@ -593,7 +593,9 @@ The runtime SHALL also provide a resource switcher for globally addressable view
 
 ### Requirement: Capability-Driven Operations
 
-The runtime SHALL derive available list, get, CRUD, non-CRUD action, and streaming controls exclusively from descriptor capabilities backed by canonical IR operations. It SHALL NOT synthesize CRUD controls or invoke an undocumented method. Generic operation labels SHALL derive deterministically from OpenAPI summary and `operationId` when typed operation presentation metadata does not supply a label. Request input controls SHALL honor requiredness, schema types, read-only and write-only semantics, and operation parameters.
+The runtime SHALL derive available list, get, CRUD, non-CRUD action, and streaming controls exclusively from descriptor capabilities backed by canonical IR operations. It SHALL NOT synthesize CRUD controls or invoke an undocumented method. On a collection page, the action chooser and applicable generated hotkeys SHALL include both operations on the collection view and operations on the item view for the currently highlighted row. Selected-item operations SHALL be discovered only through a navigable unambiguous collection-to-item edge, SHALL use that edge's complete binding plan to pre-bind the highlighted row, and SHALL be absent when no row is selected or the binding plan cannot be evaluated. The action set and bindings SHALL follow selection changes without requiring item-detail navigation.
+
+Generic operation labels SHALL derive deterministically from OpenAPI summary and `operationId` when typed operation presentation metadata does not supply a label. Request input controls SHALL honor requiredness, schema types, read-only and write-only semantics, operation parameters, and values already supplied by the active stack or selected-row binding plan. Projection SHALL treat collection operations and selected-item operations exposed together as simultaneously visible when validating generated hotkey conflicts.
 
 #### Scenario: Read-only view with one action
 
@@ -601,6 +603,17 @@ The runtime SHALL derive available list, get, CRUD, non-CRUD action, and streami
 - WHEN the runtime renders available controls
 - THEN list, get, and interrupt SHALL be available
 - AND create, update, and delete SHALL be absent
+
+#### Scenario: Offer actions for the highlighted item
+
+- GIVEN a Dinosaurs collection exposes create and list operations
+- AND its item view exposes get, update, and delete operations through a navigable collection-to-item edge binding `{id}` from the selected row
+- WHEN a dinosaur row is highlighted and the user opens the action chooser
+- THEN create, update, and delete SHALL be offered in deterministic order
+- AND list and get SHALL remain read controls rather than actions
+- AND update and delete SHALL receive the highlighted dinosaur's bound `id` without asking the user to re-enter it
+- WHEN the collection has no selected row
+- THEN only the collection-level create operation SHALL be offered
 
 ### Requirement: Exact HTTP Request Construction
 
@@ -613,6 +626,14 @@ The generated client SHALL construct requests from descriptor operations, using 
 - WHEN the runtime executes the operation
 - THEN the test server SHALL receive that exact method and path with each value encoded in its declared segment
 - AND no scope SHALL be dropped, reordered, or replaced by a selected row from another frame
+
+#### Scenario: Selected-item action request
+
+- GIVEN the highlighted collection row has identity `dinosaur/7`
+- AND its collection-to-item edge binds that identity to the item operation's `{id}` path parameter
+- WHEN the user chooses the documented update or delete action from the collection page
+- THEN the request SHALL use the documented method and the encoded item path containing `dinosaur%2F7`
+- AND the form SHALL omit the already-bound `id` from requested user input
 
 ### Requirement: Operation Security and Credential Safety
 
@@ -706,7 +727,7 @@ The TUI generator SHALL have `httptest` acceptance cases for item, child, action
 
 ### Requirement: Capability Conformance Gate
 
-Fixture tests SHALL prove that controls and request inputs are projected only from documented capabilities, including a read-only view, partial CRUD, a non-CRUD action, and a streaming operation. The tests SHALL fail when the runtime invents an absent CRUD operation or omits a documented supported capability.
+Fixture tests SHALL prove that controls and request inputs are projected only from documented capabilities, including a read-only view, partial CRUD, a non-CRUD action, a streaming operation, and selected-item operations exposed from a collection row. The tests SHALL fail when the runtime invents an absent CRUD operation, omits a documented supported capability, or requests a path value already supplied by a selected-row binding plan.
 
 #### Scenario: Partial capability fixture
 
@@ -717,7 +738,7 @@ Fixture tests SHALL prove that controls and request inputs are projected only fr
 
 ### Requirement: Runtime Navigation Gate
 
-Generated-runtime acceptance tests SHALL use `httptest` with `teatest` to send user keystrokes and assert initial catalog rendering without an API request, global and unavailable scoped catalog rows, catalog entry and return, protected left-prefix sort markers under truncation, resource switching, aliases, filtering, selected-row navigation, relationship choice, details, `Enter` push, `Esc` pop, breadcrumbs, multi-parent history, and inline API errors. The test SHALL exercise generated descriptors rather than a resource-specific fake runtime.
+Generated-runtime acceptance tests SHALL use `httptest` with `teatest` to send user keystrokes and assert initial catalog rendering without an API request, global and unavailable scoped catalog rows, catalog entry and return, protected left-prefix sort markers under truncation, resource switching, aliases, filtering, selected-item action discovery and binding, selected-row navigation, relationship choice, details, `Enter` push, `Esc` pop, breadcrumbs, multi-parent history, and inline API errors. The test SHALL exercise generated descriptors rather than a resource-specific fake runtime.
 
 #### Scenario: Enter and Escape preserve scope
 

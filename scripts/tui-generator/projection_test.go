@@ -143,6 +143,37 @@ func TestConflictingActionHotkeysReportBothOperations(t *testing.T) {
 	}
 }
 
+func TestCollectionAndHighlightedItemHotkeysConflict(t *testing.T) {
+	original, err := os.ReadFile("testdata/navigation.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	needle := "    get:\n      operationId: listChildren"
+	replacement := `    post:
+      operationId: createChild
+      x-trex-tui: {hotkey: x}
+      responses:
+        "201": {description: child, content: {application/json: {schema: {$ref: "#/components/schemas/Child"}}}}
+    get:
+      operationId: listChildren`
+	contents := strings.Replace(string(original), needle, replacement, 1)
+	if contents == string(original) {
+		t.Fatal("collection action fixture replacement did not match")
+	}
+	path := filepath.Join(t.TempDir(), "collection-item-conflict.yaml")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	document, err := ir.Load(path, ir.LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = projectDocument(document)
+	if err == nil || !strings.Contains(err.Error(), "createChild") || !strings.Contains(err.Error(), "archiveChild") || !strings.Contains(err.Error(), "hotkey \"x\" conflicts") || !strings.Contains(err.Error(), path+"#/") {
+		t.Fatalf("collection/item hotkey conflict diagnostic = %v", err)
+	}
+}
+
 func TestSharedIRConformanceFixtureProjection(t *testing.T) {
 	document, err := ir.Load(filepath.Join("..", "openapi-ir", "testdata", "conformance", "openapi.yaml"), ir.LoadOptions{})
 	if err != nil {

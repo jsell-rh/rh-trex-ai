@@ -1,7 +1,7 @@
 # Reconciliation Checkpoint
 
 **Last Updated:** 2026-08-04
-**Last Run By:** Codex (reconcile skill — resource catalog and protected sort prefix implementation)
+**Last Run By:** Codex (reconcile skill — highlighted-item action implementation)
 
 ---
 
@@ -98,16 +98,16 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-088 | CG-006 | Shared Dialog Host and Dialog Primitives | closed | major | `ModalHost` owns shared dialog framing and behavior; form footer navigation precedes adjacent cancel/submit actions, with Enter rightmost and rendered through the primary semantic action style. |
 | GAP-089 | CG-006 | Schema-Driven Form Dialog | closed | major | `FormDialog` groups required fields first, measures display cells to align name/type/requiredness/input columns, indents errors beneath their inputs, and renders safe inline diagnostics through the danger semantic style. |
 | GAP-090 | CG-006 | Refresh and Stale-Data Lifecycle | closed | major | The generated `--refresh-interval` defaults to five seconds and accepts zero; active readable frames poll without overlap, streams/hidden frames are excluded, late results are ignored, post-action refresh is immediate, and stale/error/selection/last-success state is preserved and recovered. |
-| GAP-091 | CG-006 | Presentation Component Conformance Gate | closed | major | Architecture and runtime tests prove shared catalog composition, no-request startup and unavailable-scope guards, catalog entry/return, scoped-only descriptors, and visible narrow-column sort prefixes. |
+| GAP-091 | CG-006 | Presentation Component Conformance Gate | closed | major | Unit and `teatest` coverage proves collection actions merge with highlighted-item actions, disappear without selection, retain applicable hotkeys, omit the pre-bound path field, and execute the exact encoded item request. |
 | GAP-058 | CG-006 | Resource View Graph Projection | closed | minor | Descriptors retain global/scoped views, explicit and inferred edge provenance, explicit precedence, and diagnostics for ambiguous disconnected views. |
 | GAP-059 | CG-006 | Multi-Parent Views and Navigation Stack | closed | minor | Runtime frames preserve the actual incoming edge, selected identity, bindings, and parent-specific selection across push/pop navigation. |
-| GAP-060 | CG-006 | Deterministic Path-Parameter Binding | closed | major | Link mappings support the complete OpenAPI runtime-expression grammar; inherited and selected-row bindings are deterministic, location-aware, and reject missing or ambiguous values before HTTP. |
+| GAP-060 | CG-006 | Deterministic Path-Parameter Binding | closed | major | The shared action-candidate resolver evaluates the same navigable same-schema collection-to-item edge plan used by navigation and carries selected-row values into item forms and requests. |
 | GAP-061 | CG-006 | Typed Resource Presentation Extension | closed | minor | The grammar validates and preserves presentation metadata plus schema type/format; runtime priority now controls deterministic compression resistance without reordering or making any declared column inaccessible. |
 | GAP-062 | CG-006 | Deterministic Presentation Defaults | closed | minor | Metadata-free resources derive stable labels, identity, readable columns, priority order, and sorting from normalized schemas. |
-| GAP-063 | CG-006 | Typed Operation Presentation Metadata | closed | major | Projection validates and retains static labels, local hotkeys, and typed confirmations, rejects unknown/visibility/unsafe/conflicting metadata with both source pointers, and adds an unavoidable safe-focus destructive confirmation to every DELETE operation. |
+| GAP-063 | CG-006 | Typed Operation Presentation Metadata | closed | major | Projection validates hotkey conflicts across deduplicated collection and same-schema highlighted-item actions after final relationship precedence, with source-located cross-view conflict coverage. |
 | GAP-064 | CG-006 | Resource Switching, Tables, Filtering, and Detail | closed | minor | The TUI starts on a complete catalog of collection descriptors, distinguishes global/required scope and ready/context-required state, guards unavailable selections without requests, and retains Resources as the command and navigation root. |
-| GAP-065 | CG-006 | Capability-Driven Operations | closed | major | Only normalized documented operations become controls; generic prompts collect typed path/query/header values and JSON bodies for actions and streams. |
-| GAP-066 | CG-006 | Exact HTTP Request Construction | closed | major | Request tests cover path/query/header collisions, simple/label/matrix styles, form/deep-object serialization, `allowReserved`, JSON validation, status ranges, and no-request failures. |
+| GAP-065 | CG-006 | Capability-Driven Operations | closed | major | One deterministic action-candidate path supplies chooser rows, generated hotkeys, forms, and execution from collection operations plus documented same-schema item operations for the current highlighted row. |
+| GAP-066 | CG-006 | Exact HTTP Request Construction | closed | major | `teatest` now proves a highlighted `dinosaur/7` update omits the bound ID input and sends the documented PATCH with `/dinosaurs/dinosaur%2F7` and the exact JSON body. |
 | GAP-067 | CG-006 | Operation Security and Credential Safety | closed | major | Inherit/none/override and optional anonymous alternatives are preserved; unsupported required schemes fail, tokens use files, and credentials cannot cross origins without explicit trust. |
 | GAP-068 | CG-006 | Terminal-Safe Rendering | closed | critical | Tables, details, breadcrumbs, errors, streams, labels, and statuses pass through idempotent sanitizers covering CSI, OSC, DCS, string controls, C0/C1, DEL, layout controls, and framework markup. |
 | GAP-069 | CG-006 | Actionable Projection Diagnostics | closed | minor | Projection aggregates safe failures with file, JSON Pointer, operation/view, and field context before installing any output. |
