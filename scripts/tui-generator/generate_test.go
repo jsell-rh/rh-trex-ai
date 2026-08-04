@@ -93,6 +93,101 @@ func TestRepositoryOpenAPIGeneratesBuildableRuntime(t *testing.T) {
 	runGeneratedCommand(t, output, "go", "build", "./cmd/...")
 }
 
+func TestGenerationReplacesOutputWithoutTouchingSibling(t *testing.T) {
+	parent := t.TempDir()
+	output := filepath.Join(parent, "generated")
+	sibling := output + ".previous"
+	if err := os.MkdirAll(output, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(output, "stale"), []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(output, outputMarker), []byte(outputMarkerContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sibling, []byte("unrelated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := generate(generateOptions{
+		SpecPath: "testdata/navigation.yaml", OutDir: output,
+		Module: "example.com/navigation-tui", Binary: "navigation-tui",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(output, "stale")); !os.IsNotExist(err) {
+		t.Fatalf("stale output remains after replacement: %v", err)
+	}
+	content, err := os.ReadFile(sibling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "unrelated" {
+		t.Fatalf("sibling changed during output replacement: %q", content)
+	}
+	matches, err := filepath.Glob(filepath.Join(parent, ".tui-backup-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary backups remain after generation: %v", matches)
+	}
+}
+
+func TestGenerationRefusesToReplaceUnownedOutput(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "source-repository")
+	if err := os.MkdirAll(output, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(output, "keep-me")
+	if err := os.WriteFile(sentinel, []byte("unrelated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := generate(generateOptions{
+		SpecPath: "testdata/navigation.yaml", OutDir: output,
+		Module: "example.com/navigation-tui", Binary: "navigation-tui",
+	})
+	if err == nil || !strings.Contains(err.Error(), "refusing to replace unowned output") {
+		t.Fatalf("generation error = %v, want unowned-output refusal", err)
+	}
+	content, readErr := os.ReadFile(sentinel)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(content) != "unrelated" {
+		t.Fatalf("unowned output changed: %q", content)
+	}
+}
+
+func TestGenerationRefusesSymbolicLinkOutput(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "owned-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(target, "keep-me")
+	if err := os.WriteFile(sentinel, []byte("unrelated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(parent, "generated")
+	if err := os.Symlink(target, output); err != nil {
+		t.Fatal(err)
+	}
+	err := generate(generateOptions{
+		SpecPath: "testdata/navigation.yaml", OutDir: output,
+		Module: "example.com/navigation-tui", Binary: "navigation-tui",
+	})
+	if err == nil || !strings.Contains(err.Error(), "symbolic-link output") {
+		t.Fatalf("generation error = %v, want symbolic-link refusal", err)
+	}
+	if content, readErr := os.ReadFile(sentinel); readErr != nil || string(content) != "unrelated" {
+		t.Fatalf("symbolic-link target changed: content=%q err=%v", content, readErr)
+	}
+	if info, statErr := os.Lstat(output); statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("output symlink changed: info=%v err=%v", info, statErr)
+	}
+}
+
 func snapshotTree(t *testing.T, root string) []treeEntry {
 	t.Helper()
 	var entries []treeEntry

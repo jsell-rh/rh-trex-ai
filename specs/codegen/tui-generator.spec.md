@@ -291,6 +291,14 @@ The repository SHALL provide `make generate-tui`, SHALL include it in `make gene
 - THEN SDK, CLI, console, and TUI artifacts SHALL have been generated
 - AND a TUI failure SHALL prevent a partial staged TUI tree from replacing the previous output
 
+#### Scenario: Refuse an unowned output directory
+
+- GIVEN the configured TUI output is a non-empty directory without the generator's exact ownership marker
+- WHEN TUI generation would replace that directory
+- THEN generation SHALL fail before renaming or deleting the existing directory
+- AND every existing file SHALL remain unchanged
+- AND a symbolic-link output SHALL be rejected rather than followed or replaced
+
 ### Requirement: Graph Conformance Gate
 
 The TUI generator SHALL have fixture tests for flat resources, multiply scoped views, one view reachable through multiple parents, explicit Link precedence, conservative inference, and ambiguous relationships. Tests SHALL assert descriptor edges, provenance, scope, and addressability rather than only successful generation.
