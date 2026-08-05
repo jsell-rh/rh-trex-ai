@@ -20,6 +20,8 @@ A production-ready REST and gRPC API template for bootstrapping new Go microserv
 - Prometheus metrics, health checks, structured logging
 - Spec-Driven Development with agent-executable skills
 
+![TRex terminal UI showing the Fossil resource table](trex-tui.png)
+
 ## Quick Start
 
 ```sh
