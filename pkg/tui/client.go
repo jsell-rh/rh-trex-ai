@@ -190,17 +190,11 @@ func (client *Client) BuildRequest(ctx context.Context, operation Operation, inp
 		request.Header.Set("Content-Type", operation.RequestBody.ContentType)
 	}
 	if !operation.Security.None {
-		anonymousAllowed := false
 		bearerSupported := false
 		for _, alternative := range operation.Security.Requirements {
-			if len(alternative.Schemes) == 0 {
-				anonymousAllowed = true
-			} else {
+			if len(alternative.Schemes) > 0 {
 				bearerSupported = true
 			}
-		}
-		if client.config.Token == "" && !anonymousAllowed {
-			return nil, fmt.Errorf("operation %s requires a bearer token", operation.ID)
 		}
 		if client.config.Token != "" && bearerSupported {
 			requestOrigin := origin(requestURL)

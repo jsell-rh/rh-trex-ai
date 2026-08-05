@@ -720,7 +720,7 @@ The generated client SHALL construct requests from descriptor operations, using 
 
 ### Requirement: Operation Security and Credential Safety
 
-The client SHALL preserve the distinction among inherited document security, explicit `security: []`, and non-empty operation overrides. It SHALL apply runtime-supplied credentials only through a supported declared security alternative, SHALL support the TRex HTTP bearer scheme, and SHALL fail generation with an actionable diagnostic when a required operation has no supported security alternative. Credentials SHALL be bound to the user-configured API origin; the client SHALL refuse to attach them to a different operation-level server origin unless the user explicitly trusts that origin. Non-loopback plaintext HTTP SHALL require an explicit insecure runtime option. The client SHALL NOT embed credentials in generated source or descriptors, send credentials to an explicitly unauthenticated operation, or include credential values in rendered errors, logs, panic output, or test snapshots.
+The client SHALL preserve the distinction among inherited document security, explicit `security: []`, and non-empty operation overrides. It SHALL apply runtime-supplied credentials only through a supported declared security alternative, SHALL support the TRex HTTP bearer scheme, and SHALL fail generation with an actionable diagnostic when a required operation has no supported security alternative. The absence of a runtime-supplied credential SHALL NOT be treated as a local request-validation failure: the client SHALL send the request without an `Authorization` header and defer authentication enforcement to the configured server. This permits the documented local `run-no-auth` workflow while allowing an authentication-enabled server to return its normal `401` response through the shared API-error presentation. Credentials SHALL be bound to the user-configured API origin; the client SHALL refuse to attach them to a different operation-level server origin unless the user explicitly trusts that origin. Non-loopback plaintext HTTP SHALL require an explicit insecure runtime option. The client SHALL NOT embed credentials in generated source or descriptors, send credentials to an explicitly unauthenticated operation, or include credential values in rendered errors, logs, panic output, or test snapshots.
 
 #### Scenario: Public and authenticated operations
 
@@ -729,6 +729,15 @@ The client SHALL preserve the distinction among inherited document security, exp
 - WHEN both operations are invoked with a configured token
 - THEN the inherited operation SHALL receive the bearer credential
 - AND the explicitly unauthenticated operation SHALL receive no credential
+
+#### Scenario: Use the documented no-auth local server
+
+- GIVEN an operation inherits required Bearer security from the OpenAPI document
+- AND the TUI has no runtime-supplied token
+- WHEN the configured server is running with authentication disabled and the operation is invoked
+- THEN the client SHALL send the request without an `Authorization` header
+- AND a successful server response SHALL be handled normally rather than replaced by a local missing-token error
+- AND if the server instead requires authentication, its `401` response SHALL use the shared safe API-error presentation
 
 #### Scenario: Unsupported required scheme
 

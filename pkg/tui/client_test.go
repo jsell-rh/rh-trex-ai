@@ -140,6 +140,54 @@ func TestOptionalBearerSecurityAllowsAnonymousRequest(t *testing.T) {
 	}
 }
 
+func TestRequiredBearerWithoutTokenDefersAuthenticationToServer(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		if authorization := request.Header.Get("Authorization"); authorization != "" {
+			t.Fatalf("anonymous request authorization = %q", authorization)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"items":[]}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Descriptor{Servers: []Server{{URL: server.URL}}}, ClientConfig{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := Operation{
+		ID: "listScientists", Method: http.MethodGet, PathParts: []PathPart{{Literal: "/scientists"}},
+		Response: ResponseShape{ContentType: "application/json", ItemsPointer: "/items"}, SuccessStatuses: []string{"200"},
+		Security: EffectiveSecurity{Requirements: []SecurityAlternative{{Schemes: []string{"Bearer"}}}},
+	}
+	if _, err := client.Execute(context.Background(), operation, RequestInput{}); err != nil {
+		t.Fatalf("server-authorized anonymous request failed locally: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+
+	authenticatedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if authorization := request.Header.Get("Authorization"); authorization != "" {
+			t.Fatalf("rejected anonymous request authorization = %q", authorization)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(writer, `{"kind":"Error","reason":"Authentication required","code":"test-401"}`)
+	}))
+	defer authenticatedServer.Close()
+	authenticatedClient, err := NewClient(Descriptor{Servers: []Server{{URL: authenticatedServer.URL}}}, ClientConfig{BaseURL: authenticatedServer.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = authenticatedClient.Execute(context.Background(), operation, RequestInput{})
+	apiError, ok := err.(*APIError)
+	if !ok || apiError.Status != http.StatusUnauthorized || apiError.Reason != "Authentication required" {
+		t.Fatalf("authentication server error = %#v (%T), want retained 401 API error", err, err)
+	}
+}
+
 func TestStreamDoesNotInheritFiniteRequestTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		flusher := writer.(http.Flusher)

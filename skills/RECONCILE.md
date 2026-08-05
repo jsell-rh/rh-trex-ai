@@ -1,7 +1,7 @@
 # Reconciliation Checkpoint
 
 **Last Updated:** 2026-08-04
-**Last Run By:** Codex (reconcile skill — unified primary-binary TUI build workflow)
+**Last Run By:** Codex (reconcile skill — no-auth TUI/server security alignment)
 
 ---
 
@@ -108,7 +108,7 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-064 | CG-006 | Resource Switching, Tables, Filtering, and Detail | closed | minor | The home catalog uses the simple `Resources` title and one full-table-width resource-name column containing only unscoped collection views; scoped views remain available through bound parent relationships and the contextual switcher. |
 | GAP-065 | CG-006 | Capability-Driven Operations | closed | major | One deterministic action-candidate path supplies chooser rows, generated hotkeys, forms, and execution from collection operations plus documented same-schema item operations for the current highlighted row. |
 | GAP-066 | CG-006 | Exact HTTP Request Construction | closed | major | `teatest` now proves a highlighted `dinosaur/7` update omits the bound ID input and sends the documented PATCH with `/dinosaurs/dinosaur%2F7` and the exact JSON body. |
-| GAP-067 | CG-006 | Operation Security and Credential Safety | closed | major | Inherit/none/override and optional anonymous alternatives are preserved; unsupported required schemes fail, tokens use files, and credentials cannot cross origins without explicit trust. |
+| GAP-067 | CG-006 | Operation Security and Credential Safety | closed | major | Inherit/none/override and optional anonymous alternatives are preserved; supplied tokens use declared schemes and cannot cross origins without explicit trust, while an absent token is sent as an anonymous request for the server to authorize, including `run-no-auth`. |
 | GAP-068 | CG-006 | Terminal-Safe Rendering | closed | critical | Tables, details, breadcrumbs, errors, streams, labels, and statuses pass through idempotent sanitizers covering CSI, OSC, DCS, string controls, C0/C1, DEL, layout controls, and framework markup. |
 | GAP-069 | CG-006 | Actionable Projection Diagnostics | closed | minor | Projection aggregates safe failures with file, JSON Pointer, operation/view, and field context before installing any output. |
 | GAP-070 | CG-006 | Repository Generation Workflow | closed | `make generate-tui` atomically owns `data/generated/tui`, normal `make generate` invokes it, and `generate-all` plus generator CI include it. |
@@ -187,3 +187,4 @@ API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. The remainin
 | 2026-08-04 | 91.2% (177/194) | Replaced the standalone TUI target with an integrated primary-binary `tui` contract and reopened six gaps for shared runtime ownership, descriptor-only generation, command wiring, workflow, and acceptance coverage. | Codex |
 | 2026-08-04 | 94.3% (183/194) | Closed GAP-057, GAP-070, GAP-076, GAP-077, GAP-081, and GAP-091 by moving the reusable runtime to `pkg/tui`, generating only embedded in-module descriptors, registering the real primary-binary Cobra command, removing standalone output, wiring normal generation, and proving deterministic integrated builds and command behavior. | Codex |
 | 2026-08-04 | 94.3% (183/194) | Kept CG-006 fully covered while making the standard `binary` and `install` targets regenerate the embedded TUI descriptor, so one top-level build produces the unified CLI/TUI executable without a separate TUI step. | Codex |
+| 2026-08-05 | 94.3% (183/194) | Kept CG-006 fully covered by deferring missing-token enforcement to the configured server: `run-no-auth` now accepts anonymous TUI requests, supplied Bearer credentials retain origin protections, and authentication-enabled servers still surface their `401` response safely. | Codex |
