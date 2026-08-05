@@ -97,7 +97,7 @@ help:
 	@echo "make generate-sdk-python  generate Python SDK only"
 	@echo "make generate-sdk-ts      generate TypeScript SDK only"
 	@echo "make generate-cli         generate CLI from OpenAPI"
-	@echo "make generate-tui         generate integrated TUI descriptor from OpenAPI"
+	@echo "make generate-tui         regenerate embedded TUI descriptor only"
 	@echo "make generate-all         generate SDK + CLI + console plugin + TUI"
 	@echo "make generate-console-plugin  generate OpenShift Console dynamic plugin"
 	@echo "make generate-clean       remove generated SDK/CLI/plugin output"
@@ -173,13 +173,13 @@ lint:
 
 # Build binaries
 # NOTE it may be necessary to use CGO_ENABLED=0 for backwards compatibility with centos7 if not using centos7
-binary: check-gopath
+binary: check-gopath generate-tui
 	echo "Building version: ${build_version}"
 	${GO} build -ldflags="$(ldflags)" ./cmd/trex
 .PHONY: binary
 
 # Install
-install: check-gopath
+install: check-gopath generate-tui
 	CGO_ENABLED=$(CGO_ENABLED) GOEXPERIMENT=boringcrypto ${GO} install -ldflags="$(ldflags)" ./cmd/trex
 	@ ${GO} version | grep -q "$(GO_VERSION)" || \
 		( \
@@ -529,8 +529,8 @@ generate-console-plugin:
 
 .PHONY: generate-tui
 generate-tui:
-	@echo "Generating integrated TUI descriptor from OpenAPI specs..."
-	cd scripts/tui-generator && $(GO) run . \
+	@echo "Refreshing embedded TUI descriptor from OpenAPI specs..."
+	cd scripts/tui-generator && TERM=dumb $(GO) run . \
 		--spec $(PWD)/openapi/openapi.yaml \
 		--out $(TUI_OUT)
 

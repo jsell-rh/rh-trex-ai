@@ -1,7 +1,7 @@
 # Reconciliation Checkpoint
 
 **Last Updated:** 2026-08-04
-**Last Run By:** Codex (reconcile skill — integrated primary-binary TUI implementation)
+**Last Run By:** Codex (reconcile skill — unified primary-binary TUI build workflow)
 
 ---
 
@@ -81,7 +81,7 @@ Reconciliation MUST proceed in this order to respect dependencies:
 | GAP-040 | CG-005 | Consumer Fixture Conformance | closed | minor | All four consumer suites load the shared fixture through the canonical IR; the TUI asserts supported operations, paths, relationships, security, and its required diagnostic for the fixture's unsupported OAuth operations. |
 | GAP-055 | CG-006 | Canonical IR Consumption | closed | minor | `scripts/tui-generator` loads only `scripts/openapi-ir` and projects its normalized document; no independent YAML traversal exists. |
 | GAP-056 | CG-006 | Descriptor-Driven Generic Runtime | closed | minor | OpenAPI resources project to stable descriptors consumed by one resource-agnostic Bubble Tea model with no entity-specific tables or clients. |
-| GAP-057 | CG-006 | Integrated Service Subcommand | closed | major | `cmd/trex` registers `pkg/cmd.NewTUICommand` with the embedded `data/generated/tui` descriptor; the command constructs the shared model directly with all established flags and no child executable or wrapper. |
+| GAP-057 | CG-006 | Integrated Service Subcommand | closed | major | `cmd/trex` registers `pkg/cmd.NewTUICommand` with the embedded `data/generated/tui` descriptor; `binary` and `install` regenerate it before compiling the single primary executable, and the command constructs the shared model directly with no child executable or wrapper. |
 | GAP-078 | CG-006 | Full-Screen Application Shell | closed | major | `Shell.Render` exclusively owns the header, conditional command bar, framed semantic page, breadcrumb, contextual hints, modal overlay, and final-row alert rail; page transitions replace content without remounting chrome. |
 | GAP-079 | CG-006 | Service-Neutral Header and Semantic Theme | closed | minor | The centralized theme explicitly applies primary headers, selection-accent unselected text, and black selected text on that exact same accent background instead of inheriting Bubbles' pre-set foreground. |
 | GAP-093 | CG-006 | Contextual Header Shortcut Palette | closed | minor | `ShortcutPalette` measures one shared key-token width, pads variable-width tokens, gives every column the same display-cell width, and keeps every Action at the same relative offset in the terminal-right palette. |
@@ -186,3 +186,4 @@ API parity, CG-005, CG-006, STD-003, and STD-004 are fully covered. The remainin
 | 2026-08-04 | 94.3% (183/194) | Closed GAP-074, GAP-087–089, and GAP-091 with compact Close-default TRex errors, safe scrollable details, non-disruptive background failures, and confirmed/unconfirmed form correction retained until success. | Codex |
 | 2026-08-04 | 91.2% (177/194) | Replaced the standalone TUI target with an integrated primary-binary `tui` contract and reopened six gaps for shared runtime ownership, descriptor-only generation, command wiring, workflow, and acceptance coverage. | Codex |
 | 2026-08-04 | 94.3% (183/194) | Closed GAP-057, GAP-070, GAP-076, GAP-077, GAP-081, and GAP-091 by moving the reusable runtime to `pkg/tui`, generating only embedded in-module descriptors, registering the real primary-binary Cobra command, removing standalone output, wiring normal generation, and proving deterministic integrated builds and command behavior. | Codex |
+| 2026-08-04 | 94.3% (183/194) | Kept CG-006 fully covered while making the standard `binary` and `install` targets regenerate the embedded TUI descriptor, so one top-level build produces the unified CLI/TUI executable without a separate TUI step. | Codex |

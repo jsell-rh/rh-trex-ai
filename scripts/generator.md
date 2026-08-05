@@ -396,12 +396,11 @@ Produces a React/PatternFly application with webpack module federation, deployme
 Generates the OpenAPI-derived descriptor package consumed by the reusable Bubble Tea runtime compiled into the primary service executable. The descriptor retains resource views, graph relationships, exact operations, path-binding plans, security state, and optional typed `x-trex-tui` presentation metadata.
 
 ```bash
-make generate-tui
 make binary
 ./trex tui --server http://localhost:8000 --token-file /dev/stdin < token.txt
 ```
 
-The integrated command intentionally has no raw `--token` argument. Use `--token-file /dev/stdin` when credentials should come from a pipe.
+`make binary` regenerates the embedded descriptor and compiles the CLI and TUI into the same `trex` executable. `make generate-tui` remains available when only the generated descriptor needs to be inspected or refreshed. The integrated command intentionally has no raw `--token` argument. Use `--token-file /dev/stdin` when credentials should come from a pipe.
 
 ---
 
@@ -432,6 +431,6 @@ The integrated command intentionally has no raw `--token` argument. Use `--token
 | `make generate-sdk-ts`         | Generate TypeScript SDK only              |
 | `make generate-cli`            | Generate CLI project                      |
 | `make generate-console-plugin` | Generate OpenShift Console dynamic plugin |
-| `make generate-tui`            | Generate integrated TUI descriptor         |
+| `make generate-tui`            | Regenerate embedded TUI descriptor only    |
 | `make generate-all`            | Generate SDK + CLI + Console Plugin + TUI |
 | `make generate-clean`          | Remove standalone SDK/CLI/plugin output   |

@@ -98,14 +98,17 @@ The generated TUI SHALL use a generic runtime driven by generated descriptors. D
 
 The generator SHALL produce only a deterministic descriptor package beneath `data/generated/tui` in the service module. The primary service Cobra root SHALL register that package with a `tui` subcommand, and the primary service executable SHALL link the shared `pkg/tui` runtime and all required Bubble Tea dependencies directly. The generated package SHALL NOT contain a `go.mod`, executable entry point, copied runtime source, command wrapper, or shell invocation. The repository SHALL NOT generate or support a separate `trex-tui` executable.
 
-The `tui` subcommand SHALL accept no positional arguments and SHALL preserve the existing `--server`, `--token-file`, `--insecure`, repeatable `--trust-origin`, and `--refresh-interval` behavior. It SHALL default the server from the generated OpenAPI descriptor, read credentials before starting the terminal program, construct the generic model directly, and run it in the alternate screen. Building the primary service executable and rendering its command help SHALL require no database or running service; only interactive API use SHALL require a reachable configured server.
+The `tui` subcommand SHALL accept no positional arguments and SHALL preserve the existing `--server`, `--token-file`, `--insecure`, repeatable `--trust-origin`, and `--refresh-interval` behavior. It SHALL default the server from the generated OpenAPI descriptor, read credentials before starting the terminal program, construct the generic model directly, and run it in the alternate screen. The standard primary-binary build and install targets SHALL regenerate the embedded TUI descriptor before compiling so users build the CLI and TUI as one executable through one top-level target. Building the primary service executable and rendering its command help SHALL require no database or running service; only interactive API use SHALL require a reachable configured server.
 
 #### Scenario: Build and discover the integrated command
 
-- GIVEN TUI descriptors generated from the repository OpenAPI document
-- WHEN the primary service executable is built and its root help is rendered
-- THEN the executable SHALL build successfully and list the `tui` subcommand
+- GIVEN the repository OpenAPI document is valid for TUI projection
+- WHEN the user invokes the standard primary-binary build target and renders the resulting root help
+- THEN that one target SHALL regenerate the embedded TUI descriptor and compile the primary executable
+- AND the executable SHALL build successfully and list the `tui` subcommand
 - AND the executable SHALL contain the generated descriptors and reusable runtime without locating or executing another binary or runtime file
+- AND no separate TUI build target or executable SHALL be required for ordinary build, test, install, or use
+- AND descriptor regeneration SHALL NOT query or otherwise require an interactive terminal
 - AND the build and help commands SHALL NOT require a database or running TRex service
 
 #### Scenario: Launch with the established runtime options

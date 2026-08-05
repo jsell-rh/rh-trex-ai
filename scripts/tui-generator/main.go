@@ -14,5 +14,5 @@ func main() {
 	if err := generate(options); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("TUI generated in %s\n", options.OutDir)
+	fmt.Printf("Embedded TUI descriptor updated in %s\n", options.OutDir)
 }
