@@ -378,7 +378,7 @@ import (
     "context"
     "net"
 
-    "github.com/golang/glog"
+    "log/slog"
     "google.golang.org/grpc"
     "google.golang.org/grpc/credentials"
     "google.golang.org/grpc/health"
@@ -416,7 +416,8 @@ func NewDefaultGRPCServer(env *environments.Env) Server {
     // TLS on the gRPC listener alone (see grpc_tls.go).
     creds, err := grpcTransportCredentials(env.Config.TLS, env.Config.GRPC)
     if err != nil {
-        glog.Fatalf("Unable to configure gRPC TLS: %v", err)
+        slog.Error("Unable to configure gRPC TLS", "error", err)
+        os.Exit(1)
     }
     if creds != nil {
         opts = append(opts, grpc.Creds(creds))
@@ -440,9 +441,10 @@ func NewDefaultGRPCServer(env *environments.Env) Server {
 func (s *grpcAPIServer) Start() {
     listener, err := s.Listen()
     if err != nil {
-        glog.Fatalf("Unable to start gRPC server: %v", err)
+        slog.Error("Unable to start gRPC server", "error", err)
+        os.Exit(1)
     }
-    glog.Infof("gRPC server listening at %s", s.env.Config.GRPC.BindAddress)
+    slog.Info("gRPC server listening", "address", s.env.Config.GRPC.BindAddress)
     s.Serve(listener)
 }
 
@@ -454,18 +456,18 @@ func (s *grpcAPIServer) Serve(listener net.Listener) {
     if err := s.grpcServer.Serve(listener); err != nil {
         Check(err, "gRPC server terminated with errors", s.env.Config.Sentry.Timeout)
     }
-    glog.Info("gRPC server terminated")
+    slog.Info("gRPC server terminated")
 }
 
 func (s *grpcAPIServer) Stop() error {
-    glog.Info("gRPC server shutting down gracefully")
+    slog.Info("gRPC server shutting down gracefully")
     s.grpcServer.GracefulStop()
     return nil
 }
 ```
 
 **Error handling strategy** (consistent with `defaultAPIServer`):
-- `Listen()` returns errors to the caller. `Start()` calls `glog.Fatalf` if listen fails — the server cannot start, so the process must exit. This matches the existing `defaultAPIServer.Start()` pattern.
+- `Listen()` returns errors to the caller. `Start()` logs the error and exits if listen fails: the server cannot start, so the process must exit. This matches the existing `defaultAPIServer.Start()` pattern.
 - `Serve()` delegates to `Check()` (from `server.go`) which logs to sentry and calls `os.Exit(1)` on real errors, but ignores `http.ErrServerClosed`-equivalent scenarios.
 - TLS credential failures are fatal — if you configured TLS but the cert is broken, the server refuses to start. No silent fallback to plaintext. After startup, a gRPC-only key pair that fails to reload is logged and the previous key pair keeps being served.
 
@@ -491,7 +493,7 @@ func TransactionUnaryInterceptor(sessionFactory db.SessionFactory) grpc.UnarySer
     return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
         ctx, txErr := db.NewContext(ctx, sessionFactory)
         if txErr != nil {
-            glog.Errorf("Failed to create DB transaction for gRPC call %s: %v", info.FullMethod, txErr)
+            slog.ErrorContext(ctx, "Failed to create DB transaction for gRPC call", "method", info.FullMethod, "error", txErr)
             return nil, status.Error(codes.Internal, "internal database error")
         }
         defer func() {
@@ -595,7 +597,7 @@ func RecoveryUnaryInterceptor(sentryTimeout time.Duration) grpc.UnaryServerInter
     return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
         defer func() {
             if r := recover(); r != nil {
-                glog.Errorf("gRPC panic in %s: %v\n%s", info.FullMethod, r, debug.Stack())
+                slog.ErrorContext(ctx, "gRPC panic", "method", info.FullMethod, "panic", r, "stack", string(debug.Stack()))
                 sentry.CurrentHub().Recover(r)
                 sentry.Flush(sentryTimeout)
                 err = status.Error(codes.Internal, "internal server error")
@@ -612,15 +614,12 @@ func RecoveryUnaryInterceptor(sentryTimeout time.Duration) grpc.UnaryServerInter
 func LoggingUnaryInterceptor() grpc.UnaryServerInterceptor {
     return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
         start := time.Now()
-        operationID := logger.NewOperationID()
-        ctx = logger.SetOperationID(ctx, operationID)
-        log := logger.NewLogger(ctx)
+        ctx = logger.WithOpID(ctx)
 
         resp, err := handler(ctx, req)
 
-        duration := time.Since(start)
-        code := status.Code(err)
-        log.Infof("gRPC %s %s %s", info.FullMethod, code, duration)
+        slog.InfoContext(ctx, "gRPC call", "method", info.FullMethod,
+            "code", status.Code(err).String(), "duration", time.Since(start))
 
         return resp, err
     }
@@ -686,7 +685,8 @@ func runServe(getSpecData func() ([]byte, error)) {
     env.Initialize()
     specData, err := getSpecData()
     if err != nil {
-        glog.Fatalf("Failed to load OpenAPI spec: %v", err)
+        slog.Error("Failed to load OpenAPI spec", "error", err)
+        os.Exit(1)
     }
 
     var servers []pkgserver.Server
@@ -716,7 +716,7 @@ func runServe(getSpecData func() ([]byte, error)) {
     sigCh := make(chan os.Signal, 1)
     signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
     sig := <-sigCh
-    glog.Infof("Received signal %v, shutting down", sig)
+    slog.Info("Received signal, shutting down", "signal", sig.String())
 
     // Graceful shutdown with timeout
     shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -728,7 +728,7 @@ func runServe(getSpecData func() ([]byte, error)) {
         go func(srv pkgserver.Server) {
             defer wg.Done()
             if err := srv.Stop(); err != nil {
-                glog.Errorf("Error stopping server: %v", err)
+                slog.Error("Error stopping server", "error", err)
             }
         }(s)
     }
@@ -742,13 +742,13 @@ func runServe(getSpecData func() ([]byte, error)) {
 
     select {
     case <-doneCh:
-        glog.Info("All servers stopped gracefully")
+        slog.Info("All servers stopped gracefully")
     case <-shutdownCtx.Done():
-        glog.Warning("Shutdown timed out, forcing exit")
+        slog.Warn("Shutdown timed out, forcing exit")
     }
 
     env.Database.SessionFactory.Close()
-    glog.Info("Database connections closed")
+    slog.Info("Database connections closed")
 }
 ```
 
@@ -1215,7 +1215,7 @@ func (h *dinosaurGRPCHandler) WatchDinosaurs(req *pb.WatchDinosaursRequest, stre
             }
             watchEvent, err := h.eventToWatchEvent(stream.Context(), event)
             if err != nil {
-                glog.Warningf("Failed to convert event %s: %v", event.ID, err)
+                slog.WarnContext(stream.Context(), "Failed to convert event", "event_id", event.ID, "error", err)
                 continue // skip this event, don't kill the stream
             }
             if err := stream.Send(watchEvent); err != nil {

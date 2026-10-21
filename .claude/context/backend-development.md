@@ -273,25 +273,23 @@ func (s *GRPCServer) WatchEntities(req *rhtrexv1.WatchEntitiesRequest, stream rh
 ```go
 // File: pkg/services/{entity}.go
 func (s *sqlEntityService) OnUpsert(ctx context.Context, id string) error {
-    logger := logger.NewOCMLogger(ctx)
-    
     entity, err := s.dao.Get(ctx, id)
     if err != nil {
         if errors.IsNotFound(err) {
             // Entity deleted between event and processing
-            logger.Infof("Entity %s no longer exists, skipping upsert handler", id)
+            slog.InfoContext(ctx, "Entity no longer exists, skipping upsert handler", "id", id)
             return nil
         }
         return err
     }
     
     // Idempotent business logic - safe to run multiple times
-    logger.Infof("Processing entity upsert: %s (name: %s)", entity.ID, entity.Name)
+    slog.InfoContext(ctx, "Processing entity upsert", "id", entity.ID, "name", entity.Name)
     
     // Example: Update external system
     if err := s.externalClient.SyncEntity(ctx, entity); err != nil {
         // Log but don't fail - will retry on next event
-        logger.Errorf("Failed to sync entity %s to external system: %v", entity.ID, err)
+        slog.ErrorContext(ctx, "Failed to sync entity to external system", "id", entity.ID, "error", err)
         return err
     }
     
@@ -299,8 +297,7 @@ func (s *sqlEntityService) OnUpsert(ctx context.Context, id string) error {
 }
 
 func (s *sqlEntityService) OnDelete(ctx context.Context, id string) error {
-    logger := logger.NewOCMLogger(ctx)
-    logger.Infof("Processing entity deletion: %s", id)
+    slog.InfoContext(ctx, "Processing entity deletion", "id", id)
     
     // Cleanup external resources - idempotent
     if err := s.externalClient.DeleteEntity(ctx, id); err != nil {
@@ -414,24 +411,25 @@ func (s *service) ProcessLargeDataset(ctx context.Context) error {
 ```
 
 ### Structured Logging
+Log with `log/slog`, through the `...Context` functions whenever a context is in scope.
+The handler trex installs adds `opid`, `accountID` and `tx_id` from the context, and a
+program's own handler (for example an OpenTelemetry bridge) gets the trace and span from it.
+Use a constant message and put variable data in attributes; errors go under the `error` key.
+
 ```go
-import "github.com/openshift-online/rh-trex-ai/pkg/logger"
+import "log/slog"
 
 func (s *service) ProcessEntity(ctx context.Context, id string) error {
-    logger := logger.NewOCMLogger(ctx)
-    
-    logger.Infof("Starting entity processing: %s", id)
-    defer func() {
-        logger.Infof("Completed entity processing: %s", id)
-    }()
+    slog.InfoContext(ctx, "Starting entity processing", "id", id)
+    defer slog.InfoContext(ctx, "Completed entity processing", "id", id)
     
     entity, err := s.dao.Get(ctx, id)
     if err != nil {
-        logger.Errorf("Failed to get entity %s: %v", id, err)
+        slog.ErrorContext(ctx, "Failed to get entity", "id", id, "error", err)
         return err
     }
     
-    logger.V(10).Infof("Processing entity: %+v", entity)
+    slog.DebugContext(ctx, "Processing entity", "entity", entity)
     return nil
 }
 ```

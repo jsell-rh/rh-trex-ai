@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -102,20 +103,19 @@ func (f *Default) DirectDB() *sql.DB {
 }
 
 func waitForNotification(ctx context.Context, l *pq.Listener, callback func(id string)) bool {
-	logger := trexlogger.NewLogger(ctx)
 	select {
 	case <-ctx.Done():
 		return false
 	case n := <-l.Notify:
 		if n != nil {
-			logger.Infof("Received data from channel [%s] : %s", n.Channel, n.Extra)
+			slog.InfoContext(ctx, "Received data from channel", "channel", n.Channel, "data", n.Extra)
 			callback(n.Extra)
 		}
 		return true
 	case <-time.After(10 * time.Second):
 		go func() {
 			if err := l.Ping(); err != nil {
-				logger.V(5).Infof("Listener ping error: %v", err)
+				slog.DebugContext(ctx, "Listener ping error", "error", err)
 			}
 		}()
 		return true
@@ -123,11 +123,9 @@ func waitForNotification(ctx context.Context, l *pq.Listener, callback func(id s
 }
 
 func newListener(ctx context.Context, connstr, channel string, callback func(id string)) {
-	logger := trexlogger.NewLogger(ctx)
-
 	plog := func(ev pq.ListenerEventType, err error) {
 		if err != nil {
-			logger.Error(err.Error())
+			slog.ErrorContext(ctx, "Database listener error", "error", err)
 		}
 	}
 	listener := pq.NewListener(connstr, 10*time.Second, time.Minute, plog)
@@ -136,14 +134,14 @@ func newListener(ctx context.Context, connstr, channel string, callback func(id 
 		panic(err)
 	}
 
-	logger.Infof("Starting channeling monitor for %s", channel)
+	slog.InfoContext(ctx, "Starting channeling monitor", "channel", channel)
 	for waitForNotification(ctx, listener, callback) {
 	}
 
 	if err := listener.Close(); err != nil {
-		logger.V(5).Infof("Error closing listener: %v", err)
+		slog.DebugContext(ctx, "Error closing listener", "error", err)
 	}
-	logger.Infof("Stopped channeling monitor for %s", channel)
+	slog.InfoContext(ctx, "Stopped channeling monitor", "channel", channel)
 }
 
 func (f *Default) NewListener(ctx context.Context, channel string, callback func(id string)) {

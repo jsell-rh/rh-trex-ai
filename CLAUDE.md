@@ -45,7 +45,7 @@ Use the skills in `skills/` for all standard operations. Never improvise manual 
 
 Specs (`specs/`) define desired state. Skills (`skills/`) define procedures. `skills/RECONCILE.md` tracks gaps across sessions.
 
-**Spec registry:** `specs/index.spec.md` — all 18 specs with dependency graph across 6 domains (framework, api, data, security, codegen, standards).
+**Spec registry:** `specs/index.spec.md`: all specs with dependency graph across 6 domains (framework, api, data, security, codegen, standards).
 
 **SDLC workflow:**
 ```
@@ -104,9 +104,11 @@ Specs (`specs/`) define desired state. Skills (`skills/`) define procedures. `sk
 
 **Performance:** `--http-read-timeout` (default: 5s), `--http-write-timeout` (default: 30s)
 
+**Logging:** `--log-level` (`debug`|`info`|`warn`|`error`, default: `info`), `--log-format` (`text`|`json`, default: `text`). Logs go to stderr through `log/slog`; a program can install its own handler with `slog.SetDefault` (see `specs/standards/logging.spec.md`). The old glog flags `-v`, `--logtostderr`, `--alsologtostderr` are deprecated but still accepted.
+
 ### `trex migrate`
 
-Same database flags as `trex serve`. Idempotent — safe to run multiple times.
+Same database and logging flags as `trex serve`. Idempotent: safe to run multiple times.
 
 ## Architecture
 

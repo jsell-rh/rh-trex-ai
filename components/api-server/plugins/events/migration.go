@@ -12,8 +12,8 @@ import (
 func migration() *gormigrate.Migration {
 	type Event struct {
 		db.Model
-		Source         string     `gorm:"index"`
-		SourceID       string     `gorm:"index"`
+		Source         string `gorm:"index"`
+		SourceID       string `gorm:"index"`
 		EventType      string
 		ReconciledDate *time.Time `gorm:"null;index"`
 	}

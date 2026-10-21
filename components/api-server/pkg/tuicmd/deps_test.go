@@ -17,7 +17,7 @@ func TestTUICommandDoesNotLinkTheServerFramework(t *testing.T) {
 	const module = "github.com/openshift-online/rh-trex-ai/components/api-server/"
 	forbiddenThirdParty := []string{
 		"gorm.io/", "github.com/go-gormigrate/", "google.golang.org/grpc", "google.golang.org/genproto",
-		"github.com/golang/glog", "github.com/prometheus/", "go.opentelemetry.io/", "github.com/getsentry/",
+		"github.com/prometheus/", "go.opentelemetry.io/", "github.com/getsentry/",
 	}
 	allowedInternal := map[string]bool{module + "pkg/tui": true, module + "pkg/tuicmd": true}
 	var violations []string

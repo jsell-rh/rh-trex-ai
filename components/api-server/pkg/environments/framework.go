@@ -1,11 +1,12 @@
 package environments
 
 import (
+	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
 
-	"github.com/golang/glog"
 	"github.com/spf13/pflag"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/client/apiclient"
@@ -55,30 +56,34 @@ func (e *Env) AddFlags(flags *pflag.FlagSet) error {
 }
 
 func (e *Env) Initialize() error {
-	glog.Infof("Initializing %s environment", e.Name)
-
 	envImpl, found := envImpls[e.Name]
 	if !found {
-		glog.Fatalf("Unknown runtime environment: %s", e.Name)
+		return fmt.Errorf("unknown runtime environment: %s", e.Name)
 	}
 
 	if err := envImpl.OverrideConfig(e.Config); err != nil {
-		glog.Fatalf("Failed to configure ApplicationConfig: %s", err)
+		return fmt.Errorf("failed to configure ApplicationConfig: %w", err)
 	}
+
+	// Apply --log-level and --log-format before anything else logs.
+	if err := e.Config.Logging.Install(); err != nil {
+		return fmt.Errorf("failed to configure logging: %w", err)
+	}
+	slog.Info("Initializing environment", "environment", e.Name)
 
 	messages := globalEnv.Config.ReadFiles()
 	if len(messages) != 0 {
-		glog.Fatalf("unable to read configuration files:\n%s", strings.Join(messages, "\n"))
+		return fmt.Errorf("unable to read configuration files:\n%s", strings.Join(messages, "\n"))
 	}
 
 	// Validate after ReadFiles so file-derived values (for example TLS
 	// certificate paths filled in from the environment) are already in place.
 	if messages := globalEnv.Config.Validate(); len(messages) != 0 {
-		glog.Fatalf("invalid configuration:\n%s", strings.Join(messages, "\n"))
+		return fmt.Errorf("invalid configuration:\n%s", strings.Join(messages, "\n"))
 	}
 
 	if err := envImpl.OverrideDatabase(&e.Database); err != nil {
-		glog.Fatalf("Failed to configure Database: %s", err)
+		return fmt.Errorf("failed to configure Database: %w", err)
 	}
 
 	err := e.LoadClients()
@@ -86,12 +91,12 @@ func (e *Env) Initialize() error {
 		return err
 	}
 	if err := envImpl.OverrideClients(&e.Clients); err != nil {
-		glog.Fatalf("Failed to configure Clients: %s", err)
+		return fmt.Errorf("failed to configure Clients: %w", err)
 	}
 
 	e.LoadServices()
 	if err := envImpl.OverrideServices(&e.Services); err != nil {
-		glog.Fatalf("Failed to configure Services: %s", err)
+		return fmt.Errorf("failed to configure Services: %w", err)
 	}
 
 	seedErr := e.Seed()
@@ -100,7 +105,7 @@ func (e *Env) Initialize() error {
 	}
 
 	if err := envImpl.OverrideHandlers(&e.Handlers); err != nil {
-		glog.Fatalf("Failed to configure Handlers: %s", err)
+		return fmt.Errorf("failed to configure Handlers: %w", err)
 	}
 
 	return nil
@@ -129,14 +134,13 @@ func (e *Env) LoadClients() error {
 	}
 
 	if e.Config.APIClient.EnableMock {
-		glog.Infof("Using Mock Authz Client")
+		slog.Info("Using mock authz client")
 		e.Clients.APIClient, err = apiclient.NewClientMock(apiClientConfig)
 	} else {
 		e.Clients.APIClient, err = apiclient.NewClient(apiClientConfig)
 	}
 	if err != nil {
-		glog.Errorf("Unable to create API Authz client: %s", err.Error())
-		return err
+		return fmt.Errorf("unable to create API authz client: %w", err)
 	}
 
 	return nil
@@ -145,7 +149,7 @@ func (e *Env) LoadClients() error {
 func (e *Env) Teardown() {
 	if e.Database.SessionFactory != nil {
 		if err := e.Database.SessionFactory.Close(); err != nil {
-			glog.Errorf("Error closing database session factory: %s", err.Error())
+			slog.Error("Error closing database session factory", "error", err)
 		}
 	}
 	e.Clients.APIClient.Close()
@@ -154,8 +158,7 @@ func (e *Env) Teardown() {
 func SetConfigDefaults(flags *pflag.FlagSet, defaults map[string]string) error {
 	for name, value := range defaults {
 		if err := flags.Set(name, value); err != nil {
-			glog.Errorf("Error setting flag %s: %v", name, err)
-			return err
+			return fmt.Errorf("error setting flag %s: %w", name, err)
 		}
 	}
 	return nil

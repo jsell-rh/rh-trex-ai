@@ -22,7 +22,8 @@ func RequestLoggingMiddleware(handler http.Handler) http.Handler {
 		loggingWriter := NewLoggingWriter(writer, request, NewJSONLogFormatter())
 
 		if doLog {
-			loggingWriter.log(loggingWriter.prepareRequestLog())
+			details, err := loggingWriter.prepareRequestLog()
+			loggingWriter.log("HTTP request", details, err)
 		}
 
 		before := time.Now()
@@ -30,7 +31,8 @@ func RequestLoggingMiddleware(handler http.Handler) http.Handler {
 		elapsed := time.Since(before).String()
 
 		if doLog {
-			loggingWriter.log(loggingWriter.prepareResponseLog(elapsed))
+			details, err := loggingWriter.prepareResponseLog(elapsed)
+			loggingWriter.log("HTTP response", details, err)
 		}
 	})
 }

@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 	"gorm.io/gorm"
 )
 
@@ -50,8 +50,6 @@ func NewAdvisoryLockFactory(connection SessionFactory) *AdvisoryLockFactory {
 }
 
 func (f *AdvisoryLockFactory) NewAdvisoryLock(ctx context.Context, id string, lockType LockType) (string, error) {
-	log := logger.NewLogger(ctx)
-
 	lock, err := f.newLock(ctx, id, lockType)
 	if err != nil {
 		return "", err
@@ -60,14 +58,14 @@ func (f *AdvisoryLockFactory) NewAdvisoryLock(ctx context.Context, id string, lo
 	// obtain the advisory lock (blocking)
 	if err := lock.lock(); err != nil {
 		UpdateAdvisoryLockCountMetric(lockType, "lock error")
+		slog.ErrorContext(ctx, "Error obtaining the advisory lock", "id", id, "type", lockType, "error", err)
 		errMsg := fmt.Sprintf("error obtaining the advisory lock for id %s type %s, %v", id, lockType, err)
-		log.Error(errMsg)
 		// the lock transaction is already started, if error happens, we return the transaction id, so that the caller
 		// can end this transaction.
 		return *lock.uuid, fmt.Errorf("%s", errMsg)
 	}
 
-	log.V(4).Info(fmt.Sprintf("Locked advisory lock id=%s type=%s - owner=%s", id, lockType, *lock.uuid))
+	slog.DebugContext(ctx, "Locked advisory lock", "id", id, "type", lockType, "owner", *lock.uuid)
 	f.mutex.Lock()
 	f.locks[*lock.uuid] = lock
 	f.mutex.Unlock()
@@ -75,8 +73,6 @@ func (f *AdvisoryLockFactory) NewAdvisoryLock(ctx context.Context, id string, lo
 }
 
 func (f *AdvisoryLockFactory) NewNonBlockingLock(ctx context.Context, id string, lockType LockType) (string, bool, error) {
-	log := logger.NewLogger(ctx)
-
 	lock, err := f.newLock(ctx, id, lockType)
 	if err != nil {
 		return "", false, err
@@ -86,14 +82,14 @@ func (f *AdvisoryLockFactory) NewNonBlockingLock(ctx context.Context, id string,
 	acquired, err := lock.nonBlockingLock()
 	if err != nil {
 		UpdateAdvisoryLockCountMetric(lockType, "lock error")
+		slog.ErrorContext(ctx, "Error obtaining the non blocking advisory lock", "id", id, "type", lockType, "error", err)
 		errMsg := fmt.Sprintf("error obtaining the non blocking advisory lock for id %s type %s, %v", id, lockType, err)
-		log.Error(errMsg)
 		// the lock transaction is already started, if error happens, we return the transaction id, so that the caller
 		// can end this transaction.
 		return *lock.uuid, false, fmt.Errorf("%s", errMsg)
 	}
 
-	log.V(4).Info(fmt.Sprintf("Locked non blocking advisory lock id=%s type=%s - owner=%s", id, lockType, *lock.uuid))
+	slog.DebugContext(ctx, "Locked non blocking advisory lock", "id", id, "type", lockType, "owner", *lock.uuid)
 	f.mutex.Lock()
 	f.locks[*lock.uuid] = lock
 	f.mutex.Unlock()
@@ -119,8 +115,6 @@ func (f *AdvisoryLockFactory) newLock(ctx context.Context, id string, lockType L
 
 // Unlock searches current locks and unlocks the one matching its owner id.
 func (f *AdvisoryLockFactory) Unlock(ctx context.Context, uuid string) {
-	log := logger.NewLogger(ctx)
-
 	if uuid == "" {
 		return
 	}
@@ -132,7 +126,7 @@ func (f *AdvisoryLockFactory) Unlock(ctx context.Context, uuid string) {
 		// the resolving UUID belongs to a service call that did *not* initiate the lock.
 		// we can safely ignore this, knowing the top-most func in the call stack
 		// will provide the correct UUID.
-		log.V(4).Info(fmt.Sprintf("Caller not lock owner. Owner %s", uuid))
+		slog.DebugContext(ctx, "Caller not lock owner", "owner", uuid)
 		return
 	}
 
@@ -144,13 +138,13 @@ func (f *AdvisoryLockFactory) Unlock(ctx context.Context, uuid string) {
 
 	if err := lock.unlock(); err != nil {
 		UpdateAdvisoryLockCountMetric(lockType, "unlock error")
-		log.Extra("lockID", lockID).Extra("owner", uuid).Error(fmt.Sprintf("Could not unlock, %v", err))
+		slog.ErrorContext(ctx, "Could not unlock", "lock_id", lockID, "owner", uuid, "error", err)
 	}
 
 	UpdateAdvisoryLockCountMetric(lockType, "OK")
 	UpdateAdvisoryLockDurationMetric(lockType, "OK", lock.startTime)
 
-	log.V(4).Info(fmt.Sprintf("Unlocked lock id=%s type=%s - owner=%s", lockID, lockType, uuid))
+	slog.DebugContext(ctx, "Unlocked lock", "id", lockID, "type", lockType, "owner", uuid)
 
 	f.mutex.Lock()
 	delete(f.locks, uuid)

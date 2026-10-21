@@ -2,13 +2,12 @@ package server
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/controllers"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/environments"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/services"
 )
 
@@ -22,8 +21,7 @@ type ControllersServer struct {
 }
 
 func (s *ControllersServer) Start() {
-	log := logger.NewLogger(context.Background())
-	log.Infof("Kind controller listening for events")
+	slog.Info("Kind controller listening for events")
 	s.SessionFactory.NewListener(context.Background(), "events", func(id string) {
 		s.KindControllerManager.Handle(id)
 		if s.Broker != nil {
@@ -34,17 +32,16 @@ func (s *ControllersServer) Start() {
 	// Start sync-the-world controller for missed event recovery
 	if s.SyncController != nil {
 		s.SyncController.Start()
-		log.Infof("Sync controller started for missed event recovery")
+		slog.Info("Sync controller started for missed event recovery")
 	}
 }
 
 func (s *ControllersServer) Stop() {
-	log := logger.NewLogger(context.Background())
-	log.Infof("Stopping controllers server")
+	slog.Info("Stopping controllers server")
 
 	if s.SyncController != nil {
 		if err := s.SyncController.Stop(); err != nil {
-			log.Error(fmt.Sprintf("Error stopping sync controller: %v", err))
+			slog.Error("Error stopping sync controller", "error", err)
 		}
 	}
 
@@ -57,7 +54,7 @@ func (s *ControllersServer) Stop() {
 	if s.done != nil {
 		<-s.done
 	}
-	log.Infof("Controllers server stopped")
+	slog.Info("Controllers server stopped")
 }
 
 func NewDefaultControllersServer(env *environments.Env) *ControllersServer {

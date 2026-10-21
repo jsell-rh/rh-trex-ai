@@ -63,7 +63,7 @@ func BuildDefaultRoutes(env *environments.Env, specData []byte) *mux.Router {
 	apiRouter := mainRouter.PathPrefix(apiPrefix).Subrouter()
 	apiRouter.HandleFunc("", metadataHandler.Get).Methods(http.MethodGet)
 
-	// OpenAPI routes are public — register them on apiRouter before the
+	// OpenAPI routes are public. Register them on apiRouter before the
 	// apiV1Router prefix subrouter so gorilla/mux matches them first and they
 	// are not wrapped by the auth middleware applied to apiV1Router.
 	openapiHandler, err := handlers.NewOpenAPIHandler(specData)

@@ -2,11 +2,11 @@ package dinosaurs
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/api"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/services"
 )
 
@@ -65,21 +65,18 @@ func applyDinosaurPatch(dinosaur *Dinosaur, patch *DinosaurPatchRequest) {
 }
 
 func (s *sqlDinosaurService) OnUpsert(ctx context.Context, id string) error {
-	logger := logger.NewLogger(ctx)
-
 	dinosaur, err := s.dinosaurDao.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 
-	logger.Infof("Do idempotent somethings with this dinosaur: %s", dinosaur.ID)
+	slog.InfoContext(ctx, "Do idempotent somethings with this dinosaur", "id", dinosaur.ID)
 
 	return nil
 }
 
 func (s *sqlDinosaurService) OnDelete(ctx context.Context, id string) error {
-	logger := logger.NewLogger(ctx)
-	logger.Infof("This dinosaur has been deleted: %s", id)
+	slog.InfoContext(ctx, "This dinosaur has been deleted", "id", id)
 	return nil
 }
 

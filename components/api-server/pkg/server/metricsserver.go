@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 
@@ -10,7 +11,6 @@ import (
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/api"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/handlers"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 type metricsServer struct {
@@ -45,7 +45,6 @@ func (s metricsServer) Serve(listener net.Listener) {
 }
 
 func (s metricsServer) Start() {
-	log := logger.NewLogger(context.Background())
 	var err error
 	if s.config.EnableHTTPS {
 		if s.config.HTTPSCertFile == "" || s.config.HTTPSKeyFile == "" {
@@ -55,14 +54,14 @@ func (s metricsServer) Start() {
 			)
 		}
 
-		log.Infof("Serving Metrics with TLS at %s", s.config.BindAddress)
+		slog.Info("Serving Metrics with TLS", "address", s.config.BindAddress)
 		err = s.httpServer.ListenAndServeTLS(s.config.HTTPSCertFile, s.config.HTTPSKeyFile)
 	} else {
-		log.Infof("Serving Metrics without TLS at %s", s.config.BindAddress)
+		slog.Info("Serving Metrics without TLS", "address", s.config.BindAddress)
 		err = s.httpServer.ListenAndServe()
 	}
 	Check(err, "Metrics server terminated with errors")
-	log.Infof("Metrics server terminated")
+	slog.Info("Metrics server terminated")
 }
 
 func (s metricsServer) Stop() error {

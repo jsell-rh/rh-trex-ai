@@ -1,9 +1,8 @@
 package auth
 
 import (
+	"log/slog"
 	"net/http"
-
-	"github.com/golang/glog"
 )
 
 type authzMiddlewareMock struct{}
@@ -16,7 +15,7 @@ func NewAuthzMiddlewareMock() AuthorizationMiddleware {
 
 func (a authzMiddlewareMock) AuthorizeApi(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		glog.Infof("Mock authz allows <any>/<any> for %q/%q", r.Method, r.URL)
+		slog.InfoContext(r.Context(), "Mock authz allows <any>/<any>", "method", r.Method, "url", r.URL.String())
 		next.ServeHTTP(w, r)
 	})
 }

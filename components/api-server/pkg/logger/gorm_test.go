@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -59,20 +60,22 @@ func TestGormLogger(t *testing.T) {
 }
 
 func TestGormLoggerNoColor(t *testing.T) {
-	setGlogFlags(t, "0")
+	restoreSlogDefault(t)
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{AddSource: true})))
 	g := NewGormLogger().LogMode(gormlogger.Info)
-	out := captureRawStderr(t, func() {
-		g.Trace(context.Background(), time.Now(), func() (string, int64) { return "SELECT 1", 1 }, nil)
-		g.Trace(context.Background(), time.Now(), func() (string, int64) { return "SELECT 2", 0 }, errors.New("bad"))
-	})
+	g.Trace(context.Background(), time.Now(), func() (string, int64) { return "SELECT 1", 1 }, nil)
+	g.Trace(context.Background(), time.Now(), func() (string, int64) { return "SELECT 2", 0 }, errors.New("bad"))
+
+	out := buf.String()
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("output has ANSI color codes: %q", out)
 	}
-	if !strings.Contains(out, "] sql elapsed=") || !strings.Contains(out, "rows=1 sql=SELECT 1\n") {
+	if !strings.Contains(out, "msg=sql ") || !strings.Contains(out, `rows=1 sql="SELECT 1"`) {
 		t.Errorf("unexpected output: %q", out)
 	}
-	// The header names this file, the code that ran the query.
+	// The source names this file, the code that ran the query.
 	if !strings.Contains(out, "gorm_test.go:") {
-		t.Errorf("header does not name the caller: %q", out)
+		t.Errorf("source does not name the caller: %q", out)
 	}
 }

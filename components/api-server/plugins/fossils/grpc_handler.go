@@ -2,8 +2,8 @@ package fossils
 
 import (
 	"context"
+	"log/slog"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -116,12 +116,12 @@ func (h *fossilGRPCHandler) WatchFossils(req *pb.WatchFossilsRequest, stream grp
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "failed to subscribe: %v", err)
 	}
-	glog.V(4).Infof("WatchFossils: subscriber %s connected", sub.ID)
+	slog.DebugContext(ctx, "WatchFossils: subscriber connected", "subscriber_id", sub.ID)
 
 	for {
 		select {
 		case <-ctx.Done():
-			glog.V(4).Infof("WatchFossils: subscriber %s disconnected", sub.ID)
+			slog.DebugContext(ctx, "WatchFossils: subscriber disconnected", "subscriber_id", sub.ID)
 			return nil
 		case evt, ok := <-sub.Events:
 			if !ok {
@@ -140,14 +140,14 @@ func (h *fossilGRPCHandler) WatchFossils(req *pb.WatchFossilsRequest, stream grp
 			if evt.EventType != api.DeleteEventType {
 				fossil, svcErr := h.service.Get(ctx, evt.SourceID)
 				if svcErr != nil {
-					glog.Warningf("WatchFossils: failed to load fossil %s: %v", evt.SourceID, svcErr)
+					slog.WarnContext(ctx, "WatchFossils: failed to load fossil", "resource_id", evt.SourceID, "error", svcErr)
 					continue
 				}
 				watchEvent.Fossil = fossilToProto(fossil)
 			}
 
 			if err := stream.Send(watchEvent); err != nil {
-				glog.V(4).Infof("WatchFossils: send error for subscriber %s: %v", sub.ID, err)
+				slog.DebugContext(ctx, "WatchFossils: send error", "subscriber_id", sub.ID, "error", err)
 				return err
 			}
 		}

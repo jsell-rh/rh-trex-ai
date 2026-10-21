@@ -96,7 +96,7 @@ func (g *gormLogger) emit(ctx context.Context, level slog.Level, msg string, att
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	h := currentHandler()
+	h := slog.Default().Handler()
 	if !h.Enabled(ctx, level) {
 		return
 	}

@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/environments"
@@ -26,7 +26,8 @@ func NewServeCommand(getSpecData func() ([]byte, error)) *cobra.Command {
 	}
 	err := environments.Environment().AddFlags(cmd.PersistentFlags())
 	if err != nil {
-		glog.Fatalf("Unable to add environment flags to serve command: %s", err.Error())
+		slog.Error("Unable to add environment flags to serve command", "error", err)
+		os.Exit(1)
 	}
 
 	return cmd
@@ -36,12 +37,14 @@ func runServe(getSpecData func() ([]byte, error)) {
 	env := environments.Environment()
 	err := env.Initialize()
 	if err != nil {
-		glog.Fatalf("Unable to initialize environment: %s", err.Error())
+		slog.Error("Unable to initialize environment", "error", err)
+		os.Exit(1)
 	}
 
 	specData, err := getSpecData()
 	if err != nil {
-		glog.Fatalf("Unable to load OpenAPI spec: %s", err.Error())
+		slog.Error("Unable to load OpenAPI spec", "error", err)
+		os.Exit(1)
 	}
 
 	var servers []pkgserver.Server
@@ -70,13 +73,13 @@ func runServe(getSpecData func() ([]byte, error)) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-sigCh
-	glog.Infof("Received signal %v, shutting down", sig)
+	slog.Info("Received signal, shutting down", "signal", sig.String())
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	controllersServer.Stop()
-	glog.Info("Controllers server stopped")
+	slog.Info("Controllers server stopped")
 
 	var wg sync.WaitGroup
 	for _, s := range servers {
@@ -84,7 +87,7 @@ func runServe(getSpecData func() ([]byte, error)) {
 		go func(srv pkgserver.Server) {
 			defer wg.Done()
 			if err := srv.Stop(); err != nil {
-				glog.Errorf("Error stopping server: %v", err)
+				slog.Error("Error stopping server", "error", err)
 			}
 		}(s)
 	}
@@ -97,11 +100,11 @@ func runServe(getSpecData func() ([]byte, error)) {
 
 	select {
 	case <-doneCh:
-		glog.Info("All servers stopped gracefully")
+		slog.Info("All servers stopped gracefully")
 	case <-shutdownCtx.Done():
-		glog.Warning("Shutdown timed out, forcing exit")
+		slog.Warn("Shutdown timed out, forcing exit")
 	}
 
 	_ = env.Database.SessionFactory.Close()
-	glog.Info("Database connections closed")
+	slog.Info("Database connections closed")
 }

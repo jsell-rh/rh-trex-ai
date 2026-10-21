@@ -53,7 +53,7 @@ db_sslmode:=disable
 db_image?=docker.io/library/postgres:14.2
 
 # Log verbosity level
-glog_v:=10
+log_level:=debug
 
 # Location of the JSON web key set used to verify tokens:
 jwks_url:=https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/certs
@@ -301,7 +301,7 @@ cmds:
 		--local="true" \
 		--ignore-unknown-parameters="true" \
 		--param="ENVIRONMENT=$(API_ENV)" \
-		--param="GLOG_V=$(glog_v)" \
+		--param="LOG_LEVEL=$(log_level)" \
 		--param="DATABASE_HOST=$(db_host)" \
 		--param="DATABASE_NAME=$(db_name)" \
 		--param="DATABASE_PASSWORD=$(db_password)" \

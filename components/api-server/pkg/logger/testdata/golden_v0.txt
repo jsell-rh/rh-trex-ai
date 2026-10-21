@@ -1,4 +1,0 @@
-W [opid=op-123][accountID=acct-9][tx_id=42]  plain warning |
-E [opid=op-123][accountID=acct-9][tx_id=42]  plain error |
-E [opid=op-123][accountID=acct-9][tx_id=42]  with extra error=boom|
-W   no context warning |

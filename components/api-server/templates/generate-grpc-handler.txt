@@ -2,8 +2,8 @@ package {{.KindLowerPlural}}
 
 import (
 	"context"
+	"log/slog"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -129,12 +129,12 @@ func (h *{{.KindLowerSingular}}GRPCHandler) Watch{{.KindPlural}}(req *pb.Watch{{
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "failed to subscribe: %v", err)
 	}
-	glog.V(4).Infof("Watch{{.KindPlural}}: subscriber %s connected", sub.ID)
+	slog.DebugContext(ctx, "Watch{{.KindPlural}}: subscriber connected", "subscriber_id", sub.ID)
 
 	for {
 		select {
 		case <-ctx.Done():
-			glog.V(4).Infof("Watch{{.KindPlural}}: subscriber %s disconnected", sub.ID)
+			slog.DebugContext(ctx, "Watch{{.KindPlural}}: subscriber disconnected", "subscriber_id", sub.ID)
 			return nil
 		case evt, ok := <-sub.Events:
 			if !ok {
@@ -153,14 +153,14 @@ func (h *{{.KindLowerSingular}}GRPCHandler) Watch{{.KindPlural}}(req *pb.Watch{{
 			if evt.EventType != api.DeleteEventType {
 				{{.KindLowerSingular}}, svcErr := h.service.Get(ctx, evt.SourceID)
 				if svcErr != nil {
-					glog.Warningf("Watch{{.KindPlural}}: failed to load {{.KindLowerSingular}} %s: %v", evt.SourceID, svcErr)
+					slog.WarnContext(ctx, "Watch{{.KindPlural}}: failed to load {{.KindLowerSingular}}", "resource_id", evt.SourceID, "error", svcErr)
 					continue
 				}
 				watchEvent.{{.Kind}} = {{.KindLowerSingular}}ToProto({{.KindLowerSingular}})
 			}
 
 			if err := stream.Send(watchEvent); err != nil {
-				glog.V(4).Infof("Watch{{.KindPlural}}: send error for subscriber %s: %v", sub.ID, err)
+				slog.DebugContext(ctx, "Watch{{.KindPlural}}: send error", "subscriber_id", sub.ID, "error", err)
 				return err
 			}
 		}

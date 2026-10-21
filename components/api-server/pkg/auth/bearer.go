@@ -2,10 +2,9 @@ package auth
 
 import (
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"strings"
-
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 // BearerTokenMiddleware creates HTTP middleware for bearer token authentication
@@ -39,8 +38,7 @@ func BearerTokenMiddleware(expectedToken string, bypassPaths []string) func(http
 
 			// Constant-time comparison to prevent timing attacks
 			if subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) != 1 {
-				log := logger.NewLogger(r.Context())
-				log.Infof("Invalid bearer token provided, length: %d", len(token))
+				slog.InfoContext(r.Context(), "Invalid bearer token provided", "length", len(token))
 				http.Error(w, "Invalid token", http.StatusUnauthorized)
 				return
 			}

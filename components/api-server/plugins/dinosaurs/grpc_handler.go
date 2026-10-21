@@ -2,8 +2,8 @@ package dinosaurs
 
 import (
 	"context"
+	"log/slog"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -107,12 +107,12 @@ func (h *dinosaurGRPCHandler) WatchDinosaurs(req *pb.WatchDinosaursRequest, stre
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "failed to subscribe: %v", err)
 	}
-	glog.V(4).Infof("WatchDinosaurs: subscriber %s connected", sub.ID)
+	slog.DebugContext(ctx, "WatchDinosaurs: subscriber connected", "subscriber_id", sub.ID)
 
 	for {
 		select {
 		case <-ctx.Done():
-			glog.V(4).Infof("WatchDinosaurs: subscriber %s disconnected", sub.ID)
+			slog.DebugContext(ctx, "WatchDinosaurs: subscriber disconnected", "subscriber_id", sub.ID)
 			return nil
 		case evt, ok := <-sub.Events:
 			if !ok {
@@ -131,14 +131,14 @@ func (h *dinosaurGRPCHandler) WatchDinosaurs(req *pb.WatchDinosaursRequest, stre
 			if evt.EventType != api.DeleteEventType {
 				dinosaur, svcErr := h.service.Get(ctx, evt.SourceID)
 				if svcErr != nil {
-					glog.Warningf("WatchDinosaurs: failed to load dinosaur %s: %v", evt.SourceID, svcErr)
+					slog.WarnContext(ctx, "WatchDinosaurs: failed to load dinosaur", "resource_id", evt.SourceID, "error", svcErr)
 					continue
 				}
 				watchEvent.Dinosaur = dinosaurToProto(dinosaur)
 			}
 
 			if err := stream.Send(watchEvent); err != nil {
-				glog.V(4).Infof("WatchDinosaurs: send error for subscriber %s: %v", sub.ID, err)
+				slog.DebugContext(ctx, "WatchDinosaurs: send error", "subscriber_id", sub.ID, "error", err)
 				return err
 			}
 		}

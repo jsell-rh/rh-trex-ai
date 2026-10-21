@@ -44,10 +44,15 @@ parameters:
   displayName: Image tag
   value: "7"
 
-- name: GLOG_V
-  displayName: GLOG V Level
-  description: Log verbosity level
-  value: "10"
+- name: LOG_LEVEL
+  displayName: Log level
+  description: Log level (debug, info, warn or error)
+  value: "debug"
+
+- name: LOG_FORMAT
+  displayName: Log format
+  description: Log format (text or json)
+  value: "text"
 
 - name: MEMORY_REQUEST
   description: Memory request for the API pods.
@@ -237,8 +242,8 @@ objects:
             - --db-user-file=/secrets/rds/db.user
             - --db-password-file=/secrets/rds/db.password
             - --db-name-file=/secrets/rds/db.name
-            - --alsologtostderr
-            - -v=${GLOG_V}
+            - --log-level=${LOG_LEVEL}
+            - --log-format=${LOG_FORMAT}
           containers:
           - name: service
             image: ${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}:${IMAGE_TAG}
@@ -294,8 +299,8 @@ objects:
             - --grpc-enable-tls=${ENABLE_GRPC_TLS}
             - --grpc-tls-cert-file=/secrets/grpc-tls/tls.crt
             - --grpc-tls-key-file=/secrets/grpc-tls/tls.key
-            - --alsologtostderr
-            - -v=${GLOG_V}
+            - --log-level=${LOG_LEVEL}
+            - --log-format=${LOG_FORMAT}
             resources:
               requests:
                 cpu: ${CPU_REQUEST}

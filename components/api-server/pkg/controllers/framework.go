@@ -2,12 +2,11 @@ package controllers
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/api"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/services"
 )
 
@@ -77,7 +76,6 @@ func (km *KindControllerManager) add(source string, ev api.EventType, fns []Cont
 func (km *KindControllerManager) Handle(id string) {
 
 	ctx := context.Background()
-	logger := logger.NewLogger(ctx)
 
 	// lock the Event with a fail-fast advisory lock context.
 	// this allows concurrent processing of many events by one or many controller managers.
@@ -86,11 +84,11 @@ func (km *KindControllerManager) Handle(id string) {
 	lockOwnerID, acquired, err := km.lockFactory.NewNonBlockingLock(ctx, id, db.Events)
 	defer km.lockFactory.Unlock(ctx, lockOwnerID)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Error obtaining the event lock: %v", err))
+		slog.ErrorContext(ctx, "Error obtaining the event lock", "event_id", id, "error", err)
 		return
 	}
 	if !acquired {
-		logger.Infof("Event %s is processed by another worker, continue to process the next", id)
+		slog.InfoContext(ctx, "Event is processed by another worker, continue to process the next", "event_id", id)
 		return
 	}
 	threadContext := context.WithValue(ctx, contextKeyEvent, id)
@@ -100,32 +98,29 @@ func (km *KindControllerManager) Handle(id string) {
 
 func (km *KindControllerManager) handle(ctx context.Context, id string) {
 
-	log := logger.NewLogger(ctx)
-
 	event, err := km.events.Get(ctx, id)
 
 	if err != nil {
-		log.Error(err.Error())
+		slog.ErrorContext(ctx, "Failed to get event", "event_id", id, "error", err)
 		return
 	}
 
 	source, found := km.controllers[event.Source]
 	if !found {
-		log.Infof("No controllers found for '%s'\n", event.Source)
+		slog.InfoContext(ctx, "No controllers found", "source", event.Source)
 		return
 	}
 
 	handlerFns, found := source[event.EventType]
 	if !found {
-		log.Infof("No handler functions found for '%s-%s'\n", event.Source, event.EventType)
+		slog.InfoContext(ctx, "No handler functions found", "source", event.Source, "event_type", event.EventType)
 		return
 	}
 
 	for _, fn := range handlerFns {
 		err := fn(ctx, event.SourceID)
 		if err != nil {
-			errStr := fmt.Sprintf("error handing event %s, %s, %s: %s", event.Source, event.EventType, id, err)
-			log.Error(errStr)
+			slog.ErrorContext(ctx, "Error handling event", "source", event.Source, "event_type", event.EventType, "event_id", id, "error", err)
 			return
 		}
 	}
@@ -135,6 +130,6 @@ func (km *KindControllerManager) handle(ctx context.Context, id string) {
 	event.ReconciledDate = &now
 	_, err = km.events.Replace(ctx, event)
 	if err != nil {
-		log.Error(err.Error())
+		slog.ErrorContext(ctx, "Failed to mark event as reconciled", "event_id", id, "error", err)
 	}
 }

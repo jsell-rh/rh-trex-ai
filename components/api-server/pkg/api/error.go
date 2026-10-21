@@ -1,14 +1,13 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 // SendNotFound sends a 404 response with some details about the non existing resource.
@@ -39,9 +38,7 @@ func SendNotFound(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotFound)
 	_, err = w.Write(data)
 	if err != nil {
-		err = fmt.Errorf("can't send response body for request '%s'", r.URL.Path)
-		logger.NewLogger(r.Context()).Error(err.Error())
-
+		slog.ErrorContext(r.Context(), "Can't send response body", "path", r.URL.Path, "error", err)
 		return
 	}
 }
@@ -61,9 +58,7 @@ func SendUnauthorized(w http.ResponseWriter, r *http.Request, message string) {
 	w.WriteHeader(http.StatusUnauthorized)
 	_, err = w.Write(data)
 	if err != nil {
-		err = fmt.Errorf("can't send response body for request '%s'", r.URL.Path)
-		logger.NewLogger(r.Context()).Error(err.Error())
-
+		slog.ErrorContext(r.Context(), "Can't send response body", "path", r.URL.Path, "error", err)
 		return
 	}
 }
@@ -73,13 +68,7 @@ func SendPanic(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, err := w.Write(getPanicBody())
 	if err != nil {
-		err = fmt.Errorf(
-			"can't send panic response for request '%s': %s",
-			r.URL.Path,
-			err.Error(),
-		)
-		logger.NewLogger(r.Context()).Error(err.Error())
-
+		slog.ErrorContext(r.Context(), "Can't send panic response", "path", r.URL.Path, "error", err)
 	}
 }
 
@@ -102,13 +91,8 @@ func getPanicBody() []byte {
 		var err error
 		panicBody, err = json.Marshal(panicError)
 		if err != nil {
-			err = fmt.Errorf(
-				"can't create the panic error body: %s",
-				err.Error(),
-			)
-			logger.NewLogger(context.Background()).Error(err.Error())
-
-			panic(err)
+			slog.Error("Can't create the panic error body", "error", err)
+			panic(fmt.Errorf("can't create the panic error body: %w", err))
 		}
 	})
 	return panicBody

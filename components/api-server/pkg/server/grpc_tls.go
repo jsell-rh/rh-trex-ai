@@ -14,11 +14,11 @@ package server
 import (
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/config"
@@ -32,7 +32,7 @@ func grpcTransportCredentials(shared *config.TLSConfig, grpcCfg *config.GRPCConf
 		if err != nil {
 			return nil, fmt.Errorf("build shared TLS configuration for gRPC (--enable-tls): %w", err)
 		}
-		glog.Infof("Using enhanced TLS configuration with minimum version %s", tlsVersionName(tlsConfig.MinVersion))
+		slog.Info("Using enhanced TLS configuration", "min_version", tlsVersionName(tlsConfig.MinVersion))
 		return credentials.NewTLS(tlsConfig), nil
 	}
 
@@ -44,8 +44,8 @@ func grpcTransportCredentials(shared *config.TLSConfig, grpcCfg *config.GRPCConf
 	if err != nil {
 		return nil, err
 	}
-	glog.Infof("Using gRPC TLS configuration from %s with minimum version %s; the key pair is reloaded when the files change",
-		grpcCfg.TLSCertFile, tlsVersionName(tlsConfig.MinVersion))
+	slog.Info("Using gRPC TLS configuration; the key pair is reloaded when the files change",
+		"cert_file", grpcCfg.TLSCertFile, "min_version", tlsVersionName(tlsConfig.MinVersion))
 	return credentials.NewTLS(tlsConfig), nil
 }
 
@@ -104,8 +104,8 @@ func statFile(path string) (fileStamp, error) {
 type keyPairReloader struct {
 	certFile string
 	keyFile  string
-	// errorf reports a failed reload; tests replace it to observe failures.
-	errorf func(format string, args ...interface{})
+	// onReloadError reports a failed reload; tests replace it to observe failures.
+	onReloadError func(err error)
 
 	mu       sync.Mutex
 	cert     *tls.Certificate
@@ -116,11 +116,15 @@ type keyPairReloader struct {
 // newKeyPairReloader loads the key pair once so that a missing or malformed
 // file is reported at startup rather than on the first handshake.
 func newKeyPairReloader(certFile, keyFile string) (*keyPairReloader, error) {
-	r := &keyPairReloader{certFile: certFile, keyFile: keyFile, errorf: glog.Errorf}
+	r := &keyPairReloader{certFile: certFile, keyFile: keyFile, onReloadError: logReloadError}
 	if err := r.load(); err != nil {
 		return nil, err
 	}
 	return r, nil
+}
+
+func logReloadError(err error) {
+	slog.Error("gRPC TLS key pair changed on disk but could not be reloaded; serving the previous one", "error", err)
 }
 
 // load reads both files and replaces the served key pair. The caller holds r.mu
@@ -166,9 +170,9 @@ func (r *keyPairReloader) getCertificate(*tls.ClientHelloInfo) (*tls.Certificate
 	defer r.mu.Unlock()
 	if r.changed() {
 		if err := r.load(); err != nil {
-			r.errorf("gRPC TLS key pair changed on disk but could not be reloaded; serving the previous one: %v", err)
+			r.onReloadError(err)
 		} else {
-			glog.Infof("gRPC TLS key pair reloaded from %s", r.certFile)
+			slog.Info("gRPC TLS key pair reloaded", "cert_file", r.certFile)
 		}
 	}
 	return r.cert, nil

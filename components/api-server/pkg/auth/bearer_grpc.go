@@ -3,9 +3,9 @@ package auth
 import (
 	"context"
 	"crypto/subtle"
+	"log/slog"
 	"strings"
 
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -70,8 +70,7 @@ func validateBearerToken(ctx context.Context, expectedToken string) error {
 
 	// Constant-time comparison to prevent timing attacks
 	if subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) != 1 {
-		log := logger.NewLogger(ctx)
-		log.Infof("Invalid bearer token provided in gRPC call, length: %d", len(token))
+		slog.InfoContext(ctx, "Invalid bearer token provided in gRPC call", "length", len(token))
 		return status.Error(codes.Unauthenticated, "invalid token")
 	}
 

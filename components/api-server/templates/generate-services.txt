@@ -2,11 +2,11 @@ package {{.KindLowerPlural}}
 
 import (
 	"context"
+	"log/slog"
 
 	"{{.Library}}/pkg/api"
 	"{{.Library}}/pkg/db"
 	"{{.Library}}/pkg/errors"
-	"{{.Library}}/pkg/logger"
 	"{{.Library}}/pkg/services"
 )
 
@@ -81,21 +81,18 @@ func apply{{.Kind}}Patch({{.KindLowerSingular}} *{{.Kind}}, patch *{{.Kind}}Patc
 }
 
 func (s *sql{{.Kind}}Service) OnUpsert(ctx context.Context, id string) error {
-	logger := logger.NewLogger(ctx)
-
 	{{.KindLowerSingular}}, err := s.{{.KindLowerSingular}}Dao.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 
-	logger.Infof("Do idempotent somethings with this {{.KindLowerSingular}}: %s", {{.KindLowerSingular}}.ID)
+	slog.InfoContext(ctx, "Do idempotent somethings with this {{.KindLowerSingular}}", "id", {{.KindLowerSingular}}.ID)
 
 	return nil
 }
 
 func (s *sql{{.Kind}}Service) OnDelete(ctx context.Context, id string) error {
-	logger := logger.NewLogger(ctx)
-	logger.Infof("This {{.KindLowerSingular}} has been deleted: %s", id)
+	slog.InfoContext(ctx, "This {{.KindLowerSingular}} has been deleted", "id", id)
 	return nil
 }
 

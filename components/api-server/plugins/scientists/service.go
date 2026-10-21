@@ -2,11 +2,11 @@ package scientists
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/api"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/services"
 )
 
@@ -71,21 +71,18 @@ func applyScientistPatch(scientist *Scientist, patch *ScientistPatchRequest) {
 }
 
 func (s *sqlScientistService) OnUpsert(ctx context.Context, id string) error {
-	logger := logger.NewLogger(ctx)
-
 	scientist, err := s.scientistDao.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 
-	logger.Infof("Do idempotent somethings with this scientist: %s", scientist.ID)
+	slog.InfoContext(ctx, "Do idempotent somethings with this scientist", "id", scientist.ID)
 
 	return nil
 }
 
 func (s *sqlScientistService) OnDelete(ctx context.Context, id string) error {
-	logger := logger.NewLogger(ctx)
-	logger.Infof("This scientist has been deleted: %s", id)
+	slog.InfoContext(ctx, "This scientist has been deleted", "id", id)
 	return nil
 }
 

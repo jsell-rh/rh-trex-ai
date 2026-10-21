@@ -2,13 +2,12 @@ package controllers
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/services"
 )
 
@@ -137,9 +136,8 @@ func (sc *SyncController) Start() {
 		ctx, cancel := context.WithCancel(context.Background())
 		sc.cancel = cancel
 
-		log := logger.NewLogger(ctx)
-		log.Infof("Starting sync controller with interval=%v, maxAge=%v, maxEvents=%d",
-			sc.interval, sc.maxAge, sc.maxEventsPerSync)
+		slog.InfoContext(ctx, "Starting sync controller",
+			"interval", sc.interval, "max_age", sc.maxAge, "max_events", sc.maxEventsPerSync)
 
 		go sc.syncLoop(ctx)
 	})
@@ -158,7 +156,6 @@ func (sc *SyncController) Stop() error {
 func (sc *SyncController) syncLoop(ctx context.Context) {
 	defer close(sc.done)
 
-	log := logger.NewLogger(ctx)
 	ticker := time.NewTicker(sc.interval)
 	defer ticker.Stop()
 
@@ -168,7 +165,7 @@ func (sc *SyncController) syncLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Sync controller shutting down")
+			slog.InfoContext(ctx, "Sync controller shutting down")
 			return
 		case <-ticker.C:
 			sc.performSync(ctx)
@@ -179,22 +176,21 @@ func (sc *SyncController) syncLoop(ctx context.Context) {
 // performSync executes one sync-the-world cycle
 func (sc *SyncController) performSync(ctx context.Context) {
 	start := time.Now()
-	log := logger.NewLogger(ctx)
 
 	defer func() {
 		duration := time.Since(start)
 		sc.metrics.syncDuration.Observe(duration.Seconds())
-		log.Infof("Sync cycle completed in %v", duration)
+		slog.InfoContext(ctx, "Sync cycle completed", "duration", duration)
 	}()
 
 	sc.metrics.syncRuns.Inc()
-	log.Info("Starting sync-the-world cycle")
+	slog.InfoContext(ctx, "Starting sync-the-world cycle")
 
 	// Find unreconciled events older than maxAge
 	events, svcErr := sc.eventService.FindUnreconciled(ctx, sc.maxAge)
 	if svcErr != nil {
 		sc.metrics.syncErrors.Inc()
-		log.Error(fmt.Sprintf("Failed to find unreconciled events: %v", svcErr))
+		slog.ErrorContext(ctx, "Failed to find unreconciled events", "error", svcErr)
 		return
 	}
 
@@ -202,7 +198,7 @@ func (sc *SyncController) performSync(ctx context.Context) {
 	sc.metrics.eventsFound.Add(float64(eventCount))
 
 	if eventCount == 0 {
-		log.V(1).Info("No unreconciled events found")
+		slog.InfoContext(ctx, "No unreconciled events found")
 		sc.metrics.oldestUnprocessed.Set(0)
 		return
 	}
@@ -215,13 +211,13 @@ func (sc *SyncController) performSync(ctx context.Context) {
 
 	// Limit events per sync cycle to prevent overwhelming the system
 	if eventCount > sc.maxEventsPerSync {
-		log.Warning(fmt.Sprintf("Found %d unreconciled events, limiting to %d per sync cycle",
-			eventCount, sc.maxEventsPerSync))
+		slog.WarnContext(ctx, "Found more unreconciled events than the per sync cycle limit",
+			"found", eventCount, "limit", sc.maxEventsPerSync)
 		events = events[:sc.maxEventsPerSync]
 		eventCount = sc.maxEventsPerSync
 	}
 
-	log.Infof("Found %d unreconciled events to reprocess", eventCount)
+	slog.InfoContext(ctx, "Found unreconciled events to reprocess", "count", eventCount)
 
 	// Requeue events for processing by triggering the normal event pipeline
 	// This uses the same advisory locking mechanism as real-time events
@@ -237,7 +233,7 @@ func (sc *SyncController) performSync(ctx context.Context) {
 		// If ReconciledDate is set, it was processed successfully
 		checkEvent, checkErr := sc.eventService.Get(ctx, event.ID)
 		if checkErr != nil {
-			log.Warning(fmt.Sprintf("Failed to verify event %s processing: %v", event.ID, checkErr))
+			slog.WarnContext(ctx, "Failed to verify event processing", "event_id", event.ID, "error", checkErr)
 			failed++
 			continue
 		}
@@ -247,13 +243,12 @@ func (sc *SyncController) performSync(ctx context.Context) {
 		} else {
 			// Event still unreconciled - might be being processed by another worker
 			// or handler failed. This is expected and will be retried next cycle.
-			log.V(2).Infof("Event %s still unreconciled after requeue attempt", event.ID)
+			slog.DebugContext(ctx, "Event still unreconciled after requeue attempt", "event_id", event.ID)
 		}
 	}
 
 	sc.metrics.eventsRequeued.Add(float64(requeued))
 	sc.metrics.eventsFailed.Add(float64(failed))
 
-	log.Infof("Sync cycle results: %d events requeued, %d failed verification",
-		requeued, failed)
+	slog.InfoContext(ctx, "Sync cycle results", "requeued", requeued, "failed_verification", failed)
 }

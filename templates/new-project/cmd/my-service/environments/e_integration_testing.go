@@ -3,9 +3,9 @@ package environments
 import (
 	"os"
 
-	pkgenv "github.com/openshift-online/rh-trex-ai/pkg/environments"
 	"github.com/openshift-online/rh-trex-ai/pkg/config"
 	"github.com/openshift-online/rh-trex-ai/pkg/db/db_session"
+	pkgenv "github.com/openshift-online/rh-trex-ai/pkg/environments"
 )
 
 var _ pkgenv.EnvironmentImpl = &IntegrationTestingEnvImpl{}
@@ -45,8 +45,7 @@ func (e *IntegrationTestingEnvImpl) OverrideClients(c *pkgenv.Clients) error {
 
 func (e *IntegrationTestingEnvImpl) Flags() map[string]string {
 	return map[string]string{
-		"v":                    "0",
-		"logtostderr":          "true",
+		"log-level":            "info",
 		"api-base-url":         "https://api.integration.openshift.com",
 		"enable-https":         "false",
 		"enable-metrics-https": "false",

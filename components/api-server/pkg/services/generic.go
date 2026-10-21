@@ -4,6 +4,7 @@ import (
 	"context"
 	e "errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 
@@ -18,7 +19,6 @@ import (
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/dao"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 type GenericService interface {
@@ -46,7 +46,6 @@ type listContext struct {
 	args             *ListArguments
 	username         string
 	pagingMeta       *api.PagingMeta
-	ulog             *logger.Logger
 	resourceList     interface{}
 	disallowedFields *map[string]string
 	resourceType     string
@@ -56,7 +55,6 @@ type listContext struct {
 }
 
 func (s *sqlGenericService) newListContext(ctx context.Context, username string, args *ListArguments, resourceList interface{}) (*listContext, interface{}, *errors.ServiceError) {
-	log := logger.NewLogger(ctx)
 	resourceModel := reflect.TypeOf(resourceList).Elem().Elem()
 	resourceTypeStr := resourceModel.Name()
 	if resourceTypeStr == "" {
@@ -72,7 +70,6 @@ func (s *sqlGenericService) newListContext(ctx context.Context, username string,
 		args:             args,
 		username:         username,
 		pagingMeta:       &api.PagingMeta{Page: args.Page},
-		ulog:             &log,
 		resourceList:     resourceList,
 		disallowedFields: &disallowedFields,
 		resourceType:     resourceTypeStr,
@@ -221,7 +218,6 @@ func (s *sqlGenericService) addJoins(listCtx *listContext, d *dao.GenericDao) {
 
 func (s *sqlGenericService) loadList(listCtx *listContext, d *dao.GenericDao) *errors.ServiceError {
 	args := listCtx.args
-	ulog := *listCtx.ulog
 
 	(*d).Count(listCtx.resourceList, &listCtx.pagingMeta.Total)
 
@@ -232,13 +228,13 @@ func (s *sqlGenericService) loadList(listCtx *listContext, d *dao.GenericDao) *e
 
 	switch {
 	case args.Size > MaxListSize:
-		ulog.Warning("A query with a size greater than the maximum was requested.")
+		slog.WarnContext(listCtx.ctx, "A query with a size greater than the maximum was requested", "size", args.Size, "max_size", MaxListSize)
 	case args.Size < 0:
-		ulog.Warning("A query with an unbound size was requested.")
+		slog.WarnContext(listCtx.ctx, "A query with an unbound size was requested", "size", args.Size)
 	case args.Size == 0:
 		// This early return is not only performant, but also necessary.
 		// gorm does not support Limit(0) any longer.
-		ulog.Infof("A query with 0 size requested, returning early without collecting any resources from database")
+		slog.InfoContext(listCtx.ctx, "A query with 0 size requested, returning early without collecting any resources from database")
 		return nil
 	}
 

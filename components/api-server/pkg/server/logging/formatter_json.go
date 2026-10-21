@@ -1,11 +1,11 @@
 package logging
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
-
-	"github.com/golang/glog"
 )
 
 func NewJSONLogFormatter() *JSONLogFormatter {
@@ -22,7 +22,7 @@ func (f *JSONLogFormatter) FormatRequestLog(r *http.Request) (string, error) {
 		RequestURI: r.RequestURI,
 		RemoteAddr: r.RemoteAddr,
 	}
-	if glog.V(10) {
+	if slog.Default().Enabled(r.Context(), slog.LevelDebug) {
 		jsonlog.Header = r.Header
 		jsonlog.Body = r.Body
 	}
@@ -36,7 +36,7 @@ func (f *JSONLogFormatter) FormatRequestLog(r *http.Request) (string, error) {
 
 func (f *JSONLogFormatter) FormatResponseLog(info *ResponseInfo) (string, error) {
 	jsonlog := jsonResponseLog{Header: nil, Status: info.Status, Elapsed: info.Elapsed}
-	if glog.V(10) {
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
 		jsonlog.Body = string(info.Body[:])
 	}
 	log, err := json.Marshal(jsonlog)

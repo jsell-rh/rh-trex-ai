@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/golang/glog"
 	gorillahandlers "github.com/gorilla/handlers"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/auth"
@@ -42,7 +43,7 @@ func NewDefaultAPIServer(env *environments.Env, specData []byte) Server {
 
 	authConfig := env.Config.GetAuthConfig()
 	if authConfig.EnableJWT {
-		glog.Info("Enabling JWT authentication middleware")
+		slog.Info("Enabling JWT authentication middleware")
 
 		jwtHandler, err := auth.NewJWTHandler().
 			WithKeysFile(authConfig.JwkCertFile).
@@ -114,19 +115,19 @@ func (s defaultAPIServer) Serve(listener net.Listener) {
 					)
 				}
 
-				glog.Info("Using legacy HTTPS configuration")
-				glog.Infof("Serving with TLS (legacy) at %s", s.env.Config.Server.BindAddress)
+				slog.Info("Using legacy HTTPS configuration")
+				slog.Info("Serving with TLS (legacy)", "address", s.env.Config.Server.BindAddress)
 				err = s.httpServer.ServeTLS(listener, s.env.Config.Server.HTTPSCertFile, s.env.Config.Server.HTTPSKeyFile)
 			} else {
-				glog.Infof("TLS configuration failed: %v", tlsErr)
-				glog.Infof("Serving without TLS at %s", s.env.Config.Server.BindAddress)
+				slog.Info("TLS configuration failed", "error", tlsErr)
+				slog.Info("Serving without TLS", "address", s.env.Config.Server.BindAddress)
 				err = s.httpServer.Serve(listener)
 			}
 		} else if tlsConfig != nil {
 			// Use enhanced TLS configuration
 			s.httpServer.TLSConfig = tlsConfig
-			glog.Infof("Using enhanced TLS configuration with minimum version %s",
-				func() string {
+			slog.Info("Using enhanced TLS configuration",
+				"min_version", func() string {
 					switch tlsConfig.MinVersion {
 					case 0x0303: // tls.VersionTLS12
 						return "TLS 1.2"
@@ -136,21 +137,21 @@ func (s defaultAPIServer) Serve(listener net.Listener) {
 						return "unknown"
 					}
 				}())
-			glog.Infof("Serving with enhanced TLS at %s", s.env.Config.Server.BindAddress)
+			slog.Info("Serving with enhanced TLS", "address", s.env.Config.Server.BindAddress)
 
 			// Serve with TLS configuration applied to the server
 			err = s.httpServer.ServeTLS(listener, "", "")
 		} else {
-			glog.Infof("Serving without TLS at %s", s.env.Config.Server.BindAddress)
+			slog.Info("Serving without TLS", "address", s.env.Config.Server.BindAddress)
 			err = s.httpServer.Serve(listener)
 		}
 	} else {
-		glog.Infof("Serving without TLS at %s", s.env.Config.Server.BindAddress)
+		slog.Info("Serving without TLS", "address", s.env.Config.Server.BindAddress)
 		err = s.httpServer.Serve(listener)
 	}
 
 	Check(err, "Web server terminated with errors")
-	glog.Info("Web server terminated")
+	slog.Info("Web server terminated")
 }
 
 func (s defaultAPIServer) Listen() (listener net.Listener, err error) {
@@ -160,7 +161,8 @@ func (s defaultAPIServer) Listen() (listener net.Listener, err error) {
 func (s defaultAPIServer) Start() {
 	listener, err := s.Listen()
 	if err != nil {
-		glog.Fatalf("Unable to start API server: %s", err)
+		slog.Error("Unable to start API server", "error", err)
+		os.Exit(1)
 	}
 	s.Serve(listener)
 
