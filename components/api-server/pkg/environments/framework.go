@@ -155,11 +155,19 @@ func (e *Env) Teardown() {
 	e.Clients.APIClient.Close()
 }
 
+// SetConfigDefaults applies an environment's flag values as new defaults.
+// It does not mark the flags as changed, so code can still tell a value the
+// user passed on the command line from an environment default.
 func SetConfigDefaults(flags *pflag.FlagSet, defaults map[string]string) error {
 	for name, value := range defaults {
-		if err := flags.Set(name, value); err != nil {
+		f := flags.Lookup(name)
+		if f == nil {
+			return fmt.Errorf("error setting flag %s: no such flag", name)
+		}
+		if err := f.Value.Set(value); err != nil {
 			return fmt.Errorf("error setting flag %s: %w", name, err)
 		}
+		f.DefValue = f.Value.String()
 	}
 	return nil
 }

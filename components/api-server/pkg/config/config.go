@@ -94,7 +94,6 @@ func (c *ApplicationConfig) Validate() []string {
 		{c.GRPC.Validate, "GRPC"},
 		{c.Auth.Validate, "Auth"},
 		{c.TLS.Validate, "TLS"},
-		{c.Logging.Validate, "Logging"},
 	}
 	var messages []string
 	for _, v := range validators {

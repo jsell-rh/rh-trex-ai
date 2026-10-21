@@ -3,8 +3,8 @@ package db_session
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -68,21 +68,19 @@ func (f *Default) Init(config *config.DatabaseConfig) {
 				PreferSimpleProtocol: true,
 			}), conf)
 			if err != nil {
-				panic(fmt.Sprintf(
-					"GORM failed to connect to %s database %s with connection string: %s\nError: %s",
-					config.Dialect,
-					config.Name,
-					config.LogSafeConnectionString(config.SSLMode != disable),
-					err.Error(),
-				))
+				slog.Error("GORM failed to connect to the database",
+					"dialect", config.Dialect,
+					"database", config.Name,
+					"connection_string", config.LogSafeConnectionString(config.SSLMode != disable),
+					"error", err)
+				os.Exit(1)
 			}
 		}
 
 		dbx, err := g2.DB()
 		if err != nil {
-			panic(fmt.Sprintf(
-				"failed to get underlying *sql.DB: %s", err.Error(),
-			))
+			slog.Error("Failed to get underlying *sql.DB", "error", err)
+			os.Exit(1)
 		}
 		dbx.SetMaxOpenConns(config.MaxOpenConnections)
 
@@ -129,9 +127,9 @@ func newListener(ctx context.Context, connstr, channel string, callback func(id 
 		}
 	}
 	listener := pq.NewListener(connstr, 10*time.Second, time.Minute, plog)
-	err := listener.Listen(channel)
-	if err != nil {
-		panic(err)
+	if err := listener.Listen(channel); err != nil {
+		slog.ErrorContext(ctx, "Failed to listen on database channel", "channel", channel, "error", err)
+		os.Exit(1)
 	}
 
 	slog.InfoContext(ctx, "Starting channeling monitor", "channel", channel)

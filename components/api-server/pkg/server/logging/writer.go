@@ -47,6 +47,7 @@ func (writer *LoggingWriter) prepareResponseLog(elapsed string) (string, error) 
 		Body:    writer.responseBody,
 		Status:  writer.responseStatus,
 		Elapsed: elapsed,
+		ctx:     writer.request.Context(),
 	}
 
 	return writer.formatter.FormatResponseLog(info)

@@ -97,8 +97,7 @@ func fakeSpanContext(t *testing.T) trace.SpanContext {
 
 func requestContext() context.Context {
 	ctx := context.WithValue(context.Background(), OpIDKey, "op-1")
-	ctx = context.WithValue(ctx, "accountID", "acct-1") //nolint:staticcheck // key used by util.GetAccountIDFromContext
-	return context.WithValue(ctx, "txid", int64(7))     //nolint:staticcheck // key read by contextAttrs
+	return context.WithValue(ctx, "accountID", "acct-1") //nolint:staticcheck // key used by util.GetAccountIDFromContext
 }
 
 func TestWithContextAttrs(t *testing.T) {
@@ -112,7 +111,7 @@ func TestWithContextAttrs(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %d records, want 3", len(got))
 	}
-	want := map[string]any{"opid": "op-1", "accountID": "acct-1", "tx_id": int64(7), "lock_id": "abc"}
+	want := map[string]any{"opid": "op-1", "accountID": "acct-1", "lock_id": "abc"}
 	a := got[0].attrs()
 	for k, v := range want {
 		if a[k] != v {
@@ -140,8 +139,8 @@ func TestWithContextAttrsDoesNotChangeCallerRecord(t *testing.T) {
 	if r.NumAttrs() != 1 {
 		t.Errorf("caller record changed: %d attrs", r.NumAttrs())
 	}
-	if n := inner.all()[0].record.NumAttrs(); n != 4 {
-		t.Errorf("handled record: got %d attrs, want 4", n)
+	if n := inner.all()[0].record.NumAttrs(); n != 3 {
+		t.Errorf("handled record: got %d attrs, want 3", n)
 	}
 }
 
@@ -214,7 +213,7 @@ func TestNewHandler(t *testing.T) {
 		if strings.Contains(out, "hidden") {
 			t.Errorf("debug record printed at info level: %q", out)
 		}
-		for _, want := range []string{"level=INFO", `msg="gRPC call"`, "method=/x.y/Z", "code=OK", "opid=op-1", "accountID=acct-1", "tx_id=7"} {
+		for _, want := range []string{"level=INFO", `msg="gRPC call"`, "method=/x.y/Z", "code=OK", "opid=op-1", "accountID=acct-1"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("output %q does not contain %q", out, want)
 			}

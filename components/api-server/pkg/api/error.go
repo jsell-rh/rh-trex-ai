@@ -92,7 +92,7 @@ func getPanicBody() []byte {
 		panicBody, err = json.Marshal(panicError)
 		if err != nil {
 			slog.Error("Can't create the panic error body", "error", err)
-			panic(fmt.Errorf("can't create the panic error body: %w", err))
+			panicBody = []byte(`{"kind":"Error","id":"1000","reason":"An unexpected error happened"}`)
 		}
 	})
 	return panicBody

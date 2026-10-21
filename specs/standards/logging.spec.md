@@ -31,7 +31,7 @@ All trex code SHALL log through the standard library `log/slog` package. Code SH
 
 ### Requirement: Request Attributes From Context
 
-The handler trex installs SHALL add request attributes read from the context to every record: `opid` (set by `OperationIDMiddleware` or `logger.WithOpID`), `accountID` and `tx_id`, each only when present. `logger.WithContextAttrs` SHALL provide this behavior as a wrapper for any `slog.Handler`.
+The handler trex installs SHALL add request attributes read from the context to every record: `opid` (set by `OperationIDMiddleware` or `logger.WithOpID`) and `accountID`, each only when present. `logger.WithContextAttrs` SHALL provide this behavior as a wrapper for any `slog.Handler`.
 
 #### Scenario: gRPC call log
 - GIVEN a gRPC call whose context carries an operation ID
@@ -60,6 +60,16 @@ The `serve` and `migrate` commands SHALL accept `--log-level` (`debug`, `info`, 
 - WHEN the service starts
 - THEN it SHALL start, print a deprecation warning, and map `-v` of 2 or more to `debug` and lower values to `info`
 - AND `--log-level`, when also given, SHALL take precedence over `-v`
+- AND a value passed on the command line SHALL take precedence over an environment's flag defaults
+
+### Requirement: No Credentials in Logs
+
+Request and response details logged at debug level SHALL NOT include credential values. The `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie` headers SHALL be redacted.
+
+#### Scenario: Debug request log
+- GIVEN `--log-level=debug`
+- WHEN a request with an `Authorization` header is logged
+- THEN the logged header value SHALL be `REDACTED`
 
 ### Requirement: GORM Logs Through slog
 

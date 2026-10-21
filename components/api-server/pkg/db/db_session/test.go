@@ -15,6 +15,7 @@ import (
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/config"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
+	trexlogger "github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 type Test struct {
@@ -131,7 +132,7 @@ func connect(name string, config *config.DatabaseConfig) (*sql.DB, *gorm.DB, fun
 		PrepareStmt:            false,
 		FullSaveAssociations:   false,
 		SkipDefaultTransaction: true,
-		Logger:                 logger.Default.LogMode(logger.Silent),
+		Logger:                 trexlogger.NewGormLogger().LogMode(logger.Silent),
 	}
 	g2, err = gorm.Open(postgres.New(postgres.Config{
 		Conn: dbx,

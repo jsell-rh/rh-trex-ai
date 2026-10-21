@@ -21,9 +21,9 @@ func NewRootCommand(serviceName, description string) *cobra.Command {
 	// Install a text handler at info level until the environment applies
 	// --log-level and --log-format. A program that already called
 	// slog.SetDefault keeps its handler.
-	logger.SetDefaultIfUnset(logger.WithContextAttrs(
-		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}),
-	))
+	if h, err := logger.NewHandler(os.Stderr, logger.FormatText, slog.LevelInfo); err == nil {
+		logger.SetDefaultIfUnset(logger.WithContextAttrs(h))
+	}
 
 	rootCmd := &cobra.Command{
 		Use:  serviceName,

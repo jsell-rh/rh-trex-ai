@@ -23,7 +23,7 @@ func (f *JSONLogFormatter) FormatRequestLog(r *http.Request) (string, error) {
 		RemoteAddr: r.RemoteAddr,
 	}
 	if slog.Default().Enabled(r.Context(), slog.LevelDebug) {
-		jsonlog.Header = r.Header
+		jsonlog.Header = redactHeaders(r.Header)
 		jsonlog.Body = r.Body
 	}
 
@@ -36,7 +36,11 @@ func (f *JSONLogFormatter) FormatRequestLog(r *http.Request) (string, error) {
 
 func (f *JSONLogFormatter) FormatResponseLog(info *ResponseInfo) (string, error) {
 	jsonlog := jsonResponseLog{Header: nil, Status: info.Status, Elapsed: info.Elapsed}
-	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+	ctx := info.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if slog.Default().Enabled(ctx, slog.LevelDebug) {
 		jsonlog.Body = string(info.Body[:])
 	}
 	log, err := json.Marshal(jsonlog)
@@ -59,4 +63,18 @@ type jsonResponseLog struct {
 	Status  int         `json:"response_status,omitempty"`
 	Body    string      `json:"response_body,omitempty"`
 	Elapsed string      `json:"elapsed,omitempty"`
+}
+
+// sensitiveHeaders hold credentials. Their values are never logged.
+var sensitiveHeaders = []string{"Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie"}
+
+// redactHeaders returns a copy of h with credential values replaced.
+func redactHeaders(h http.Header) http.Header {
+	out := h.Clone()
+	for _, name := range sensitiveHeaders {
+		if _, ok := out[name]; ok {
+			out[name] = []string{"REDACTED"}
+		}
+	}
+	return out
 }

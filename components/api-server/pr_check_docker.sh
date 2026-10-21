@@ -10,7 +10,7 @@ export GORM_PASSWORD="foobar-bizz-buzz"
 export GORM_SSLMODE="disable"
 export GORM_DEBUG="false"
 
-export LOGLEVEL="1"
+export LOGLEVEL="info"
 export TEST_SUMMARY_FORMAT="standard-verbose"
 
 go version

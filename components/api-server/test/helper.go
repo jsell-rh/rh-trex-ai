@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -58,7 +59,12 @@ func NewHelper(t *testing.T) *Helper {
 		}
 		if logLevel := os.Getenv("LOGLEVEL"); logLevel != "" {
 			slog.Info("Using custom log level", "log_level", logLevel)
-			if err := pflag.CommandLine.Set("log-level", logLevel); err != nil {
+			// A number is the old glog verbosity: it sets the deprecated -v.
+			flagName := "log-level"
+			if _, err := strconv.Atoi(logLevel); err == nil {
+				flagName = "v"
+			}
+			if err := pflag.CommandLine.Set(flagName, logLevel); err != nil {
 				slog.Error("Unable to set log level", "log_level", logLevel, "error", err)
 				os.Exit(1)
 			}

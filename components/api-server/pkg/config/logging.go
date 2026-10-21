@@ -19,9 +19,11 @@ type LoggingConfig struct {
 	vFlag     *pflag.Flag
 }
 
+const defaultLogLevel = "info"
+
 func NewLoggingConfig() *LoggingConfig {
 	return &LoggingConfig{
-		Level:  "info",
+		Level:  defaultLogLevel,
 		Format: logger.FormatText,
 	}
 }
@@ -48,26 +50,46 @@ func (c *LoggingConfig) AddFlags(fs *pflag.FlagSet) {
 	}
 }
 
-// SlogLevel returns the configured level. --log-level wins when it was set.
-// Otherwise a -v value set on the command line (or by an environment's flag
-// defaults) maps to debug when it is 2 or more, and to info below that.
+// SlogLevel returns the configured level. Sources, first match wins:
+//  1. --log-level passed on the command line.
+//  2. -v passed on the command line.
+//  3. --log-level set by an environment's flag defaults.
+//  4. -v set by an environment's flag defaults (or glog's own default).
+//  5. The built-in default, info.
+//
+// -v maps to debug when it is 2 or more, and to info below that.
 func (c *LoggingConfig) SlogLevel() (slog.Level, error) {
-	levelSet := c.levelFlag != nil && c.levelFlag.Changed
-	if !levelSet && c.vFlag != nil && c.vFlag.Changed {
-		v, err := strconv.Atoi(c.vFlag.Value.String())
-		if err != nil {
-			return slog.LevelInfo, fmt.Errorf("invalid -v value %q: %w", c.vFlag.Value.String(), err)
-		}
-		if v >= 2 {
-			return slog.LevelDebug, nil
-		}
-		return slog.LevelInfo, nil
+	switch {
+	case c.levelFlag != nil && c.levelFlag.Changed:
+		return parseLevel(c.Level)
+	case c.vFlag != nil && c.vFlag.Changed:
+		return levelFromV(c.vFlag.Value.String())
+	case c.Level != defaultLogLevel:
+		return parseLevel(c.Level)
+	case c.vFlag != nil && c.vFlag.Value.String() != "0":
+		return levelFromV(c.vFlag.Value.String())
+	default:
+		return parseLevel(c.Level)
 	}
+}
+
+func parseLevel(s string) (slog.Level, error) {
 	var level slog.Level
-	if err := level.UnmarshalText([]byte(c.Level)); err != nil {
-		return slog.LevelInfo, fmt.Errorf("invalid --log-level %q: %w", c.Level, err)
+	if err := level.UnmarshalText([]byte(s)); err != nil {
+		return slog.LevelInfo, fmt.Errorf("invalid --log-level %q: %w", s, err)
 	}
 	return level, nil
+}
+
+func levelFromV(s string) (slog.Level, error) {
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return slog.LevelInfo, fmt.Errorf("invalid -v value %q: %w", s, err)
+	}
+	if v >= 2 {
+		return slog.LevelDebug, nil
+	}
+	return slog.LevelInfo, nil
 }
 
 func (c *LoggingConfig) ReadFiles() error {
@@ -89,10 +111,10 @@ func (c *LoggingConfig) Validate() error {
 // with logger.WithContextAttrs, the slog default. It does nothing when the
 // program has set its own slog default (see logger.SetDefaultIfUnset).
 func (c *LoggingConfig) Install() error {
-	if err := c.Validate(); err != nil {
+	level, err := c.SlogLevel()
+	if err != nil {
 		return err
 	}
-	level, _ := c.SlogLevel()
 	h, err := logger.NewHandler(os.Stderr, c.Format, level)
 	if err != nil {
 		return err

@@ -6,7 +6,7 @@
 // example one that fans out to stdout and to an OpenTelemetry slog bridge,
 // receives every trex record together with its context.
 //
-// To keep the request attributes (opid, accountID, tx_id) on records sent to
+// To keep the request attributes (opid, accountID) on records sent to
 // a custom handler, wrap that handler with WithContextAttrs.
 package logger
 
@@ -25,7 +25,6 @@ import (
 const (
 	OpIDAttr      = "opid"
 	AccountIDAttr = "accountID"
-	TxIDAttr      = "tx_id"
 )
 
 // Output formats accepted by NewHandler.
@@ -50,7 +49,7 @@ func NewHandler(w io.Writer, format string, level slog.Leveler) (slog.Handler, e
 
 // WithContextAttrs wraps h so every record also carries the request
 // attributes found in the context passed to the handler: opid (from
-// OperationIDMiddleware or WithOpID), accountID and tx_id. Records logged
+// OperationIDMiddleware or WithOpID) and accountID. Records logged
 // without a context, or with a context that has none of these, are passed
 // through unchanged.
 //
@@ -95,9 +94,6 @@ func contextAttrs(ctx context.Context) []slog.Attr {
 	}
 	if account := util.GetAccountIDFromContext(ctx); account != "" {
 		attrs = append(attrs, slog.String(AccountIDAttr, account))
-	}
-	if txid, ok := ctx.Value("txid").(int64); ok {
-		attrs = append(attrs, slog.Int64(TxIDAttr, txid))
 	}
 	return attrs
 }

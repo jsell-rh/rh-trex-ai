@@ -412,7 +412,7 @@ func (s *service) ProcessLargeDataset(ctx context.Context) error {
 
 ### Structured Logging
 Log with `log/slog`, through the `...Context` functions whenever a context is in scope.
-The handler trex installs adds `opid`, `accountID` and `tx_id` from the context, and a
+The handler trex installs adds `opid` and `accountID` from the context, and a
 program's own handler (for example an OpenTelemetry bridge) gets the trace and span from it.
 Use a constant message and put variable data in attributes; errors go under the `error` key.
 
