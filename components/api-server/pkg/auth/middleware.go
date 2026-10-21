@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"os"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/golang/glog"
 )
 
 // JWTHandler provides JWT authentication without OCM dependencies
@@ -101,15 +101,15 @@ func (j *JWTHandler) Build() (func(http.Handler) http.Handler, error) {
 			// Extract JWT token from Authorization header
 			token, err := j.extractToken(r)
 			if err != nil {
-				glog.Warningf("JWT extraction failed: %v", err)
+				slog.WarnContext(r.Context(), "JWT extraction failed", "error", err)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
 			// Validate and parse the JWT token
-			parsedToken, err := j.validateToken(token)
+			parsedToken, err := j.validateToken(r.Context(), token)
 			if err != nil {
-				glog.Warningf("JWT validation failed: %v", err)
+				slog.WarnContext(r.Context(), "JWT validation failed", "error", err)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -142,7 +142,7 @@ func (j *JWTHandler) extractToken(r *http.Request) (string, error) {
 }
 
 // validateToken parses and validates the JWT token
-func (j *JWTHandler) validateToken(tokenString string) (*jwt.Token, error) {
+func (j *JWTHandler) validateToken(ctx context.Context, tokenString string) (*jwt.Token, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Validate the signing method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
@@ -164,11 +164,11 @@ func (j *JWTHandler) validateToken(tokenString string) (*jwt.Token, error) {
 			return publicKey, nil
 		}
 
-		// Unknown kid — attempt a one-shot refresh if outside cooldown window
+		// Unknown kid: attempt a one-shot refresh if outside cooldown window
 		if time.Since(j.lastKidRefresh) >= j.kidRefreshWait {
 			j.lastKidRefresh = time.Now()
 			if refreshErr := j.loadKeys(); refreshErr != nil {
-				glog.Warningf("JWT key refresh on unknown kid failed: %v", refreshErr)
+				slog.WarnContext(ctx, "JWT key refresh on unknown kid failed", "error", refreshErr)
 			} else {
 				j.keysMutex.RLock()
 				publicKey, exists = j.publicKeys[kid]
@@ -219,7 +219,7 @@ func (j *JWTHandler) loadKeys() error {
 
 	if j.keysFile != "" {
 		if err := j.loadKeysFromFileInto(newKeys); err != nil {
-			glog.Warningf("Failed to load JWT keys from file %s: %v", j.keysFile, err)
+			slog.Warn("Failed to load JWT keys from file", "file", j.keysFile, "error", err)
 			lastErr = err
 		}
 	}
@@ -229,7 +229,7 @@ func (j *JWTHandler) loadKeys() error {
 			continue
 		}
 		if err := j.loadKeysFromURLInto(url, newKeys); err != nil {
-			glog.Warningf("Failed to load JWT keys from URL %s: %v", url, err)
+			slog.Warn("Failed to load JWT keys from URL", "url", url, "error", err)
 			lastErr = err
 		}
 	}
@@ -245,7 +245,7 @@ func (j *JWTHandler) loadKeys() error {
 	j.publicKeys = newKeys
 	j.keysMutex.Unlock()
 
-	glog.Infof("Updated JWT keys: %d RSA keys loaded from all sources", len(newKeys))
+	slog.Info("Updated JWT keys from all sources", "rsa_keys", len(newKeys))
 	return nil
 }
 
@@ -277,12 +277,12 @@ func (j *JWTHandler) refreshKeysLoop() {
 		select {
 		case <-ticker.C:
 			if err := j.loadKeys(); err != nil {
-				glog.Warningf("Failed to refresh JWT keys: %v", err)
+				slog.Warn("Failed to refresh JWT keys", "error", err)
 			} else {
-				glog.V(1).Info("JWT keys refreshed successfully")
+				slog.Info("JWT keys refreshed successfully")
 			}
 		case <-j.refreshStop:
-			glog.V(1).Info("Stopping JWT key refresh loop")
+			slog.Info("Stopping JWT key refresh loop")
 			return
 		}
 	}
@@ -295,7 +295,7 @@ func (j *JWTHandler) Stop() {
 
 // loadKeysFromURLInto fetches JWK keys from the specified URL and merges them into the target map
 func (j *JWTHandler) loadKeysFromURLInto(url string, target map[string]*rsa.PublicKey) error {
-	glog.V(2).Infof("Loading JWT keys from URL: %s", url)
+	slog.Debug("Loading JWT keys from URL", "url", url)
 
 	resp, err := j.httpClient.Get(url)
 	if err != nil {
@@ -317,7 +317,7 @@ func (j *JWTHandler) loadKeysFromURLInto(url string, target map[string]*rsa.Publ
 
 // loadKeysFromFileInto loads JWK keys from a local file and merges them into the target map
 func (j *JWTHandler) loadKeysFromFileInto(target map[string]*rsa.PublicKey) error {
-	glog.V(2).Infof("Loading JWT keys from file: %s", j.keysFile)
+	slog.Debug("Loading JWT keys from file", "file", j.keysFile)
 
 	data, err := os.ReadFile(j.keysFile)
 	if err != nil {
@@ -342,13 +342,13 @@ func (j *JWTHandler) parseAndStoreKeys(data []byte, target map[string]*rsa.Publi
 
 		publicKey, err := j.jwkToRSAPublicKey(&jwk)
 		if err != nil {
-			glog.Warningf("Failed to convert JWK to RSA public key for kid %s: %v", jwk.Kid, err)
+			slog.Warn("Failed to convert JWK to RSA public key", "kid", jwk.Kid, "error", err)
 			continue
 		}
 
 		target[jwk.Kid] = publicKey
 		count++
-		glog.V(2).Infof("Loaded RSA public key with kid: %s", jwk.Kid)
+		slog.Debug("Loaded RSA public key", "kid", jwk.Kid)
 	}
 
 	if count == 0 {

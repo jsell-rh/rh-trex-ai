@@ -1,9 +1,10 @@
 package server
 
 import (
+	"log/slog"
 	"net"
+	"os"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
@@ -114,7 +115,8 @@ func NewDefaultGRPCServer(env *environments.Env) Server {
 	// TLS on the gRPC listener alone (see grpc_tls.go).
 	creds, err := grpcTransportCredentials(env.Config.TLS, env.Config.GRPC)
 	if err != nil {
-		glog.Fatalf("Unable to configure gRPC TLS: %v", err)
+		slog.Error("Unable to configure gRPC TLS", "error", err)
+		os.Exit(1)
 	}
 	if creds != nil {
 		opts = append(opts, grpc.Creds(creds))
@@ -138,9 +140,10 @@ func NewDefaultGRPCServer(env *environments.Env) Server {
 func (s *grpcAPIServer) Start() {
 	listener, err := s.Listen()
 	if err != nil {
-		glog.Fatalf("Unable to start gRPC server: %v", err)
+		slog.Error("Unable to start gRPC server", "error", err)
+		os.Exit(1)
 	}
-	glog.Infof("gRPC server listening at %s", s.env.Config.GRPC.BindAddress)
+	slog.Info("gRPC server listening", "address", s.env.Config.GRPC.BindAddress)
 	s.Serve(listener)
 }
 
@@ -152,11 +155,11 @@ func (s *grpcAPIServer) Serve(listener net.Listener) {
 	if err := s.grpcServer.Serve(listener); err != nil {
 		Check(err, "gRPC server terminated with errors")
 	}
-	glog.Info("gRPC server terminated")
+	slog.Info("gRPC server terminated")
 }
 
 func (s *grpcAPIServer) Stop() error {
-	glog.Info("gRPC server shutting down gracefully")
+	slog.Info("gRPC server shutting down gracefully")
 	s.grpcServer.GracefulStop()
 	return nil
 }

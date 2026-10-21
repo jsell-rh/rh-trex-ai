@@ -2,11 +2,11 @@ package fossils
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/api"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/services"
 )
 
@@ -80,21 +80,18 @@ func applyFossilPatch(fossil *Fossil, patch *FossilPatchRequest) {
 }
 
 func (s *sqlFossilService) OnUpsert(ctx context.Context, id string) error {
-	logger := logger.NewLogger(ctx)
-
 	fossil, err := s.fossilDao.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 
-	logger.Infof("Do idempotent somethings with this fossil: %s", fossil.ID)
+	slog.InfoContext(ctx, "Do idempotent somethings with this fossil", "id", fossil.ID)
 
 	return nil
 }
 
 func (s *sqlFossilService) OnDelete(ctx context.Context, id string) error {
-	logger := logger.NewLogger(ctx)
-	logger.Infof("This fossil has been deleted: %s", id)
+	slog.InfoContext(ctx, "This fossil has been deleted", "id", id)
 	return nil
 }
 

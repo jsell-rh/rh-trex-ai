@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
@@ -10,13 +11,12 @@ import (
 )
 
 func handleError(ctx context.Context, w http.ResponseWriter, code errors.ServiceErrorCode, reason string) {
-	log := logger.NewLogger(ctx)
 	operationID := logger.GetOperationID(ctx)
 	err := errors.New(code, "%s", reason)
 	if err.HttpCode >= 400 && err.HttpCode <= 499 {
-		log.Infof(err.Error())
+		slog.InfoContext(ctx, "Auth request rejected", "error", err)
 	} else {
-		log.Error(err.Error())
+		slog.ErrorContext(ctx, "Auth request failed", "error", err)
 	}
 
 	writeJSONResponse(w, err.HttpCode, err.AsOpenapiError(operationID))

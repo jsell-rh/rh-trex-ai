@@ -37,7 +37,7 @@ func (e *DevEnvImpl) OverrideClients(c *pkgenv.Clients) error {
 
 func (e *DevEnvImpl) Flags() map[string]string {
 	return map[string]string{
-		"v":                      "10",
+		"log-level":              "debug",
 		"enable-authz":           "false",
 		"debug":                  "false",
 		"enable-mock":            "true",

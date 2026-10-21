@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/lib/pq"
 
 	"gorm.io/driver/postgres"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/config"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
+	trexlogger "github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 type Test struct {
@@ -51,12 +52,12 @@ func (f *Test) Init(config *config.DatabaseConfig) {
 	// Only the first time
 	once.Do(func() {
 		if err := initDatabase(config, db.Migrate); err != nil {
-			glog.Errorf("error initializing test database: %s", err)
+			slog.Error("Error initializing test database", "error", err)
 			return
 		}
 
 		if err := resetDB(config); err != nil {
-			glog.Errorf("error resetting test database: %s", err)
+			slog.Error("Error resetting test database", "error", err)
 			return
 		}
 	})
@@ -131,7 +132,7 @@ func connect(name string, config *config.DatabaseConfig) (*sql.DB, *gorm.DB, fun
 		PrepareStmt:            false,
 		FullSaveAssociations:   false,
 		SkipDefaultTransaction: true,
-		Logger:                 logger.Default.LogMode(logger.Silent),
+		Logger:                 trexlogger.NewGormLogger().LogMode(logger.Silent),
 	}
 	g2, err = gorm.Open(postgres.New(postgres.Config{
 		Conn: dbx,

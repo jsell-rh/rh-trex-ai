@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 
-	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/segmentio/ksuid"
 
@@ -116,7 +116,7 @@ func (b *EventBroker) Publish(eventID string) {
 	ctx := context.Background()
 	event, svcErr := b.events.Get(ctx, eventID)
 	if svcErr != nil {
-		glog.Warningf("EventBroker: failed to load event %s: %v", eventID, svcErr)
+		slog.WarnContext(ctx, "EventBroker: failed to load event", "event_id", eventID, "error", svcErr)
 		return
 	}
 
@@ -140,7 +140,7 @@ func (b *EventBroker) Publish(eventID string) {
 			brokerEventsSent.Inc()
 		default:
 			brokerEventsDropped.Inc()
-			glog.V(5).Infof("EventBroker: dropped event %s for slow subscriber %s", eventID, subID)
+			slog.DebugContext(ctx, "EventBroker: dropped event for slow subscriber", "event_id", eventID, "subscriber_id", subID)
 		}
 	}
 }

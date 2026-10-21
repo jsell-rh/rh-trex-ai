@@ -1,9 +1,9 @@
 package environments
 
 import (
-	pkgenv "github.com/openshift-online/rh-trex-ai/pkg/environments"
 	"github.com/openshift-online/rh-trex-ai/pkg/config"
 	"github.com/openshift-online/rh-trex-ai/pkg/db/db_session"
+	pkgenv "github.com/openshift-online/rh-trex-ai/pkg/environments"
 )
 
 type DevEnvImpl struct {
@@ -37,10 +37,10 @@ func (e *DevEnvImpl) OverrideClients(c *pkgenv.Clients) error {
 
 func (e *DevEnvImpl) Flags() map[string]string {
 	return map[string]string{
-		"v":                      "10",
+		"log-level":              "debug",
 		"enable-authz":           "false",
 		"debug":                  "false",
-		"enable-mock":             "true",
+		"enable-mock":            "true",
 		"enable-https":           "false",
 		"enable-metrics-https":   "false",
 		"api-server-hostname":    "localhost",

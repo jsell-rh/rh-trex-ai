@@ -18,10 +18,9 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"net/http"
 
-	"github.com/golang/glog"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/api"
 )
 
@@ -57,8 +56,7 @@ func (h MetadataHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Send the response:
 	_, err = w.Write(data)
 	if err != nil {
-		err = fmt.Errorf("can't send response body for request '%s'", r.URL.Path)
-		glog.Error(err)
+		slog.ErrorContext(r.Context(), "Can't send response body", "path", r.URL.Path, "error", err)
 		return
 	}
 }

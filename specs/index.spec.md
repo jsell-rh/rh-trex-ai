@@ -34,12 +34,13 @@ This file is the machine-readable registry of all specifications governing the r
 | STD-002 | Error Handling | standards | Active | API-001 | `standards/error-handling.spec.md` |
 | STD-003 | Testing Standards | standards | Active | FW-002 | `standards/testing.spec.md` |
 | STD-004 | Dependency Supply Chain | standards | Active | — | `standards/dependency-supply-chain.spec.md` |
+| STD-005 | Logging | standards | Active | None | `standards/logging.spec.md` |
 
 ## Spec Dependency Order
 
 Topological layers for reconciliation:
 
-- **Layer 0 (no deps):** STD-001, STD-004, SEC-003
+- **Layer 0 (no deps):** STD-001, STD-004, STD-005, SEC-003
 - **Layer 1 (foundational):** FW-001
 - **Layer 2 (framework):** FW-002, FW-003, FW-004
 - **Layer 3 (data + api):** DA-001, API-001, API-002

@@ -1,7 +1,8 @@
 package db
 
 import (
-	"github.com/golang/glog"
+	"log/slog"
+
 	"gorm.io/gorm"
 )
 
@@ -35,7 +36,7 @@ func RegisterGormPlugin(plugin gorm.Plugin) {
 func ApplyGormPlugins(g2 *gorm.DB) {
 	for _, plugin := range gormPlugins {
 		if err := g2.Use(plugin); err != nil {
-			glog.Errorf("failed to apply GORM plugin %q, continuing without it: %v", plugin.Name(), err)
+			slog.Error("Failed to apply GORM plugin, continuing without it", "plugin", plugin.Name(), "error", err)
 		}
 	}
 }

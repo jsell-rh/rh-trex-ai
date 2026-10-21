@@ -1,9 +1,8 @@
 package logging
 
 import (
+	"log/slog"
 	"net/http"
-
-	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 func NewLoggingWriter(w http.ResponseWriter, r *http.Request, f LogFormatter) *LoggingWriter {
@@ -28,13 +27,13 @@ func (writer *LoggingWriter) WriteHeader(status int) {
 	writer.ResponseWriter.WriteHeader(status)
 }
 
-func (writer *LoggingWriter) log(logMsg string, err error) {
-	log := logger.NewLogger(writer.request.Context())
+func (writer *LoggingWriter) log(msg string, details string, err error) {
+	ctx := writer.request.Context()
 	switch err {
 	case nil:
-		log.V(Threshold).Infof(logMsg)
+		slog.InfoContext(ctx, msg, "details", details)
 	default:
-		log.Extra("error", err.Error()).Error("Unable to format request/response for log.")
+		slog.ErrorContext(ctx, "Unable to format request/response for log", "error", err)
 	}
 }
 
@@ -48,6 +47,7 @@ func (writer *LoggingWriter) prepareResponseLog(elapsed string) (string, error) 
 		Body:    writer.responseBody,
 		Status:  writer.responseStatus,
 		Elapsed: elapsed,
+		ctx:     writer.request.Context(),
 	}
 
 	return writer.formatter.FormatResponseLog(info)

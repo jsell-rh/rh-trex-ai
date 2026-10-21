@@ -2,8 +2,8 @@ package scientists
 
 import (
 	"context"
+	"log/slog"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -108,12 +108,12 @@ func (h *scientistGRPCHandler) WatchScientists(req *pb.WatchScientistsRequest, s
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "failed to subscribe: %v", err)
 	}
-	glog.V(4).Infof("WatchScientists: subscriber %s connected", sub.ID)
+	slog.DebugContext(ctx, "WatchScientists: subscriber connected", "subscriber_id", sub.ID)
 
 	for {
 		select {
 		case <-ctx.Done():
-			glog.V(4).Infof("WatchScientists: subscriber %s disconnected", sub.ID)
+			slog.DebugContext(ctx, "WatchScientists: subscriber disconnected", "subscriber_id", sub.ID)
 			return nil
 		case evt, ok := <-sub.Events:
 			if !ok {
@@ -132,14 +132,14 @@ func (h *scientistGRPCHandler) WatchScientists(req *pb.WatchScientistsRequest, s
 			if evt.EventType != api.DeleteEventType {
 				scientist, svcErr := h.service.Get(ctx, evt.SourceID)
 				if svcErr != nil {
-					glog.Warningf("WatchScientists: failed to load scientist %s: %v", evt.SourceID, svcErr)
+					slog.WarnContext(ctx, "WatchScientists: failed to load scientist", "resource_id", evt.SourceID, "error", svcErr)
 					continue
 				}
 				watchEvent.Scientist = scientistToProto(scientist)
 			}
 
 			if err := stream.Send(watchEvent); err != nil {
-				glog.V(4).Infof("WatchScientists: send error for subscriber %s: %v", sub.ID, err)
+				slog.DebugContext(ctx, "WatchScientists: send error", "subscriber_id", sub.ID, "error", err)
 				return err
 			}
 		}

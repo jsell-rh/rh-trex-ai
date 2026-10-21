@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/felixge/httpsnoop"
@@ -20,9 +21,8 @@ func TransactionMiddleware(next http.Handler, connection SessionFactory) http.Ha
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Create a new Context with the transaction stored in it.
 		ctx, err := NewContext(r.Context(), connection)
-		log := logger.NewLogger(ctx)
 		if err != nil {
-			log.Extra("error", err.Error()).Error("Could not create transaction")
+			slog.ErrorContext(ctx, "Could not create transaction", "error", err)
 			// use default error to avoid exposing internals to users
 			err := errors.GeneralError("")
 			operationID := logger.GetOperationID(ctx)

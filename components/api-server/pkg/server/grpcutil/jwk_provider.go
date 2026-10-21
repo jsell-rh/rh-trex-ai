@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/golang/glog"
 )
 
 type jwkKeyData struct {
@@ -95,12 +95,12 @@ func (p *JWKKeyProvider) loadKeys() error {
 
 	if p.keysFile != "" {
 		if err := p.loadKeysFromFile(); err != nil {
-			glog.Warningf("JWKKeyProvider: failed to load keys from file %s: %v", p.keysFile, err)
+			slog.Warn("JWKKeyProvider: failed to load keys from file", "file", p.keysFile, "error", err)
 		}
 	}
 	for _, url := range p.keysURLs {
 		if err := p.loadKeysFromURL(url); err != nil {
-			glog.Warningf("JWKKeyProvider: failed to load keys from URL %s: %v", url, err)
+			slog.Warn("JWKKeyProvider: failed to load keys from URL", "url", url, "error", err)
 		}
 	}
 	return nil
@@ -144,7 +144,7 @@ func (p *JWKKeyProvider) parseAndStoreKeys(data []byte) error {
 		}
 		pubKey, err := parseRSAPublicKey(k)
 		if err != nil {
-			glog.Warningf("JWKKeyProvider: skipping key kid=%s: %v", k.Kid, err)
+			slog.Warn("JWKKeyProvider: skipping key", "kid", k.Kid, "error", err)
 			continue
 		}
 		p.keys[k.Kid] = pubKey

@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
-	"github.com/golang/glog"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -21,6 +21,7 @@ import (
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/config"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/db"
+	trexlogger "github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 const defaultPostgresImage = "postgres:18"
@@ -50,7 +51,7 @@ func disableRyukIfPodman(ctx context.Context) {
 
 	for _, c := range ver.Components {
 		if strings.Contains(c.Name, "Podman") {
-			glog.Infof("Detected Podman runtime - disabling Ryuk reaper (bridge network not available in Podman)")
+			slog.InfoContext(ctx, "Detected Podman runtime, disabling Ryuk reaper (bridge network not available in Podman)")
 			_ = os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 			return
 		}
@@ -86,7 +87,7 @@ func (f *Testcontainer) Init(config *config.DatabaseConfig) {
 		image = defaultPostgresImage
 	}
 
-	glog.Infof("Starting PostgreSQL testcontainer (image=%s)...", image)
+	slog.InfoContext(ctx, "Starting PostgreSQL testcontainer", "image", image)
 
 	ctr, err := postgres.Run(ctx,
 		image,
@@ -106,7 +107,8 @@ func (f *Testcontainer) Init(config *config.DatabaseConfig) {
 		}),
 	)
 	if err != nil {
-		glog.Fatalf("Failed to start PostgreSQL testcontainer: %s", err)
+		slog.ErrorContext(ctx, "Failed to start PostgreSQL testcontainer", "error", err)
+		os.Exit(1)
 	}
 
 	f.container = ctr
@@ -114,15 +116,17 @@ func (f *Testcontainer) Init(config *config.DatabaseConfig) {
 	// Get connection string from container
 	connStr, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		glog.Fatalf("Failed to get connection string from testcontainer: %s", err)
+		slog.ErrorContext(ctx, "Failed to get connection string from testcontainer", "error", err)
+		os.Exit(1)
 	}
 
-	glog.Infof("PostgreSQL testcontainer started at: %s", connStr)
+	slog.InfoContext(ctx, "PostgreSQL testcontainer started", "connection_string", connStr)
 
 	// Open SQL connection
 	f.sqlDB, err = sql.Open("postgres", connStr)
 	if err != nil {
-		glog.Fatalf("Failed to connect to testcontainer database: %s", err)
+		slog.ErrorContext(ctx, "Failed to connect to testcontainer database", "error", err)
+		os.Exit(1)
 	}
 
 	// Configure connection pool
@@ -137,7 +141,7 @@ func (f *Testcontainer) Init(config *config.DatabaseConfig) {
 	}
 
 	if config.Debug {
-		conf.Logger = logger.Default.LogMode(logger.Info)
+		conf.Logger = trexlogger.NewGormLogger().LogMode(logger.Info)
 	}
 
 	f.g2, err = gorm.Open(gormpostgres.New(gormpostgres.Config{
@@ -145,13 +149,15 @@ func (f *Testcontainer) Init(config *config.DatabaseConfig) {
 		PreferSimpleProtocol: true,
 	}), conf)
 	if err != nil {
-		glog.Fatalf("Failed to connect GORM to testcontainer database: %s", err)
+		slog.ErrorContext(ctx, "Failed to connect GORM to testcontainer database", "error", err)
+		os.Exit(1)
 	}
 
 	// Run migrations
-	glog.Infof("Running database migrations on testcontainer...")
+	slog.InfoContext(ctx, "Running database migrations on testcontainer")
 	if err := db.Migrate(f.g2); err != nil {
-		glog.Fatalf("Failed to run migrations on testcontainer: %s", err)
+		slog.ErrorContext(ctx, "Failed to run migrations on testcontainer", "error", err)
+		os.Exit(1)
 	}
 
 	// Install cross-cutting GORM plugins after migrations so instrumentation
@@ -159,7 +165,7 @@ func (f *Testcontainer) Init(config *config.DatabaseConfig) {
 	// plugin registered this is a no-op.
 	db.ApplyGormPlugins(f.g2)
 
-	glog.Infof("Testcontainer database initialized successfully")
+	slog.InfoContext(ctx, "Testcontainer database initialized successfully")
 }
 
 func (f *Testcontainer) DirectDB() *sql.DB {
@@ -189,17 +195,17 @@ func (f *Testcontainer) Close() error {
 	// Close SQL connection
 	if f.sqlDB != nil {
 		if err := f.sqlDB.Close(); err != nil {
-			glog.Errorf("Error closing SQL connection: %s", err)
+			slog.ErrorContext(ctx, "Error closing SQL connection", "error", err)
 		}
 	}
 
 	// Terminate container
 	if f.container != nil {
-		glog.Infof("Stopping PostgreSQL testcontainer...")
+		slog.InfoContext(ctx, "Stopping PostgreSQL testcontainer")
 		if err := f.container.Terminate(ctx); err != nil {
 			return fmt.Errorf("failed to terminate testcontainer: %s", err)
 		}
-		glog.Infof("PostgreSQL testcontainer stopped")
+		slog.InfoContext(ctx, "PostgreSQL testcontainer stopped")
 	}
 
 	return nil
@@ -217,13 +223,13 @@ func (f *Testcontainer) ResetDB() {
 		AND table_name != 'migrations'
 	`).Scan(&tables).Error
 	if err != nil {
-		glog.Errorf("Error querying tables: %s", err)
+		slog.ErrorContext(ctx, "Error querying tables", "error", err)
 		return
 	}
 
 	for _, table := range tables {
 		if err := g2.Exec(fmt.Sprintf("TRUNCATE TABLE \"%s\" CASCADE", table)).Error; err != nil {
-			glog.Errorf("Error truncating table %s: %s", table, err)
+			slog.ErrorContext(ctx, "Error truncating table", "table", table, "error", err)
 		}
 	}
 }
@@ -232,7 +238,7 @@ func (f *Testcontainer) NewListener(ctx context.Context, channel string, callbac
 	// Get the connection string for the listener
 	connStr, err := f.container.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		glog.Errorf("Failed to get connection string for listener: %s", err)
+		slog.ErrorContext(ctx, "Failed to get connection string for listener", "error", err)
 		return
 	}
 

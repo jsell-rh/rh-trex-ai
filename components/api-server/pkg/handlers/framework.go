@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
@@ -30,13 +31,12 @@ type ErrorHandlerFunc func(ctx context.Context, w http.ResponseWriter, err *erro
 type HTTPAction func() (interface{}, *errors.ServiceError)
 
 func HandleError(ctx context.Context, w http.ResponseWriter, err *errors.ServiceError) {
-	log := logger.NewLogger(ctx)
 	operationID := logger.GetOperationID(ctx)
 	// If this is a 400 error, its the user's issue, log as info rather than error
 	if err.HttpCode >= 400 && err.HttpCode <= 499 {
-		log.Infof(err.Error())
+		slog.InfoContext(ctx, "Request failed", "error", err)
 	} else {
-		log.Error(err.Error())
+		slog.ErrorContext(ctx, "Request failed", "error", err)
 	}
 	writeJSONResponse(w, err.HttpCode, err.AsOpenapiError(operationID))
 }

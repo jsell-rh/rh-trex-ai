@@ -3,10 +3,10 @@ package handlers
 import (
 	"embed"
 	"io/fs"
+	"log/slog"
 	"net/http"
 
 	"github.com/ghodss/yaml"
-	"github.com/golang/glog"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
 )
 
@@ -26,7 +26,7 @@ func NewOpenAPIHandler(specData []byte) (*OpenAPIHandler, error) {
 			err,
 		)
 	}
-	glog.Info("Loaded OpenAPI specification")
+	slog.Info("Loaded OpenAPI specification")
 
 	uiContent, err := fs.ReadFile(openapiui, "openapi-ui.html")
 	if err != nil {
@@ -35,7 +35,7 @@ func NewOpenAPIHandler(specData []byte) (*OpenAPIHandler, error) {
 			err,
 		)
 	}
-	glog.Info("Loaded OpenAPI UI HTML from embedded file")
+	slog.Info("Loaded OpenAPI UI HTML from embedded file")
 
 	return &OpenAPIHandler{
 		openAPIDefinitions: data,

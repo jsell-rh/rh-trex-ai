@@ -3,12 +3,12 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -56,7 +56,7 @@ func RecoveryUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				glog.Errorf("gRPC panic in %s: %v\n%s", info.FullMethod, r, debug.Stack())
+				slog.ErrorContext(ctx, "gRPC panic", "method", info.FullMethod, "panic", r, "stack", string(debug.Stack()))
 				err = status.Error(codes.Internal, "internal server error")
 			}
 		}()
@@ -68,13 +68,12 @@ func LoggingUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		start := time.Now()
 		ctx = logger.WithOpID(ctx)
-		log := logger.NewLogger(ctx)
 
 		resp, err := handler(ctx, req)
 
 		duration := time.Since(start)
 		code := status.Code(err)
-		log.Infof("gRPC %s %s %s", info.FullMethod, code, duration)
+		slog.InfoContext(ctx, "gRPC call", "method", info.FullMethod, "code", code.String(), "duration", duration)
 
 		return resp, err
 	}
@@ -101,7 +100,7 @@ func TransactionUnaryInterceptor(sessionFactory db.SessionFactory) grpc.UnarySer
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		ctx, txErr := db.NewContext(ctx, sessionFactory)
 		if txErr != nil {
-			glog.Errorf("Failed to create DB transaction for gRPC call %s: %v", info.FullMethod, txErr)
+			slog.ErrorContext(ctx, "Failed to create DB transaction for gRPC call", "method", info.FullMethod, "error", txErr)
 			return nil, status.Error(codes.Internal, "internal database error")
 		}
 		defer func() {
@@ -147,7 +146,7 @@ func RecoveryStreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				glog.Errorf("gRPC stream panic in %s: %v\n%s", info.FullMethod, r, debug.Stack())
+				slog.ErrorContext(ss.Context(), "gRPC stream panic", "method", info.FullMethod, "panic", r, "stack", string(debug.Stack()))
 				err = status.Error(codes.Internal, "internal server error")
 			}
 		}()
@@ -159,15 +158,14 @@ func LoggingStreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		start := time.Now()
 		ctx := logger.WithOpID(ss.Context())
-		log := logger.NewLogger(ctx)
-		log.Infof("gRPC stream started %s", info.FullMethod)
+		slog.InfoContext(ctx, "gRPC stream started", "method", info.FullMethod)
 
 		wrapped := &wrappedServerStream{ServerStream: ss, ctx: ctx}
 		err := handler(srv, wrapped)
 
 		duration := time.Since(start)
 		code := status.Code(err)
-		log.Infof("gRPC stream ended %s %s %s", info.FullMethod, code, duration)
+		slog.InfoContext(ctx, "gRPC stream ended", "method", info.FullMethod, "code", code.String(), "duration", duration)
 
 		return err
 	}

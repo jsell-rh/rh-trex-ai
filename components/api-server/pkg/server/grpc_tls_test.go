@@ -343,10 +343,10 @@ func TestGRPCOnlyTLSKeepsServingWhenRenewalIsUnreadable(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var reloadErrors []string
-	reloader.errorf = func(format string, args ...interface{}) {
+	reloader.onReloadError = func(err error) {
 		mu.Lock()
 		defer mu.Unlock()
-		reloadErrors = append(reloadErrors, fmt.Sprintf(format, args...))
+		reloadErrors = append(reloadErrors, err.Error())
 	}
 	addr := startTLSHealthServer(t, credentials.NewTLS(&tls.Config{
 		GetCertificate: reloader.getCertificate,

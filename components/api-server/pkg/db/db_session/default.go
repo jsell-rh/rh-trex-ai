@@ -3,7 +3,8 @@ package db_session
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -52,6 +53,9 @@ func (f *Default) Init(config *config.DatabaseConfig) {
 		conf := &gorm.Config{
 			PrepareStmt:          false,
 			FullSaveAssociations: false,
+			// Send SQL logs through slog with the statement context, without
+			// color codes. New() silences sessions unless DB debug is on.
+			Logger: trexlogger.NewGormLogger(),
 		}
 		g2, err = gorm.Open(postgres.New(postgres.Config{
 			DSN:                  dsn,
@@ -64,21 +68,19 @@ func (f *Default) Init(config *config.DatabaseConfig) {
 				PreferSimpleProtocol: true,
 			}), conf)
 			if err != nil {
-				panic(fmt.Sprintf(
-					"GORM failed to connect to %s database %s with connection string: %s\nError: %s",
-					config.Dialect,
-					config.Name,
-					config.LogSafeConnectionString(config.SSLMode != disable),
-					err.Error(),
-				))
+				slog.Error("GORM failed to connect to the database",
+					"dialect", config.Dialect,
+					"database", config.Name,
+					"connection_string", config.LogSafeConnectionString(config.SSLMode != disable),
+					"error", err)
+				os.Exit(1)
 			}
 		}
 
 		dbx, err := g2.DB()
 		if err != nil {
-			panic(fmt.Sprintf(
-				"failed to get underlying *sql.DB: %s", err.Error(),
-			))
+			slog.Error("Failed to get underlying *sql.DB", "error", err)
+			os.Exit(1)
 		}
 		dbx.SetMaxOpenConns(config.MaxOpenConnections)
 
@@ -99,20 +101,19 @@ func (f *Default) DirectDB() *sql.DB {
 }
 
 func waitForNotification(ctx context.Context, l *pq.Listener, callback func(id string)) bool {
-	logger := trexlogger.NewLogger(ctx)
 	select {
 	case <-ctx.Done():
 		return false
 	case n := <-l.Notify:
 		if n != nil {
-			logger.Infof("Received data from channel [%s] : %s", n.Channel, n.Extra)
+			slog.InfoContext(ctx, "Received data from channel", "channel", n.Channel, "data", n.Extra)
 			callback(n.Extra)
 		}
 		return true
 	case <-time.After(10 * time.Second):
 		go func() {
 			if err := l.Ping(); err != nil {
-				logger.V(5).Infof("Listener ping error: %v", err)
+				slog.DebugContext(ctx, "Listener ping error", "error", err)
 			}
 		}()
 		return true
@@ -120,27 +121,25 @@ func waitForNotification(ctx context.Context, l *pq.Listener, callback func(id s
 }
 
 func newListener(ctx context.Context, connstr, channel string, callback func(id string)) {
-	logger := trexlogger.NewLogger(ctx)
-
 	plog := func(ev pq.ListenerEventType, err error) {
 		if err != nil {
-			logger.Error(err.Error())
+			slog.ErrorContext(ctx, "Database listener error", "error", err)
 		}
 	}
 	listener := pq.NewListener(connstr, 10*time.Second, time.Minute, plog)
-	err := listener.Listen(channel)
-	if err != nil {
-		panic(err)
+	if err := listener.Listen(channel); err != nil {
+		slog.ErrorContext(ctx, "Failed to listen on database channel", "channel", channel, "error", err)
+		os.Exit(1)
 	}
 
-	logger.Infof("Starting channeling monitor for %s", channel)
+	slog.InfoContext(ctx, "Starting channeling monitor", "channel", channel)
 	for waitForNotification(ctx, listener, callback) {
 	}
 
 	if err := listener.Close(); err != nil {
-		logger.V(5).Infof("Error closing listener: %v", err)
+		slog.DebugContext(ctx, "Error closing listener", "error", err)
 	}
-	logger.Infof("Stopped channeling monitor for %s", channel)
+	slog.InfoContext(ctx, "Stopped channeling monitor", "channel", channel)
 }
 
 func (f *Default) NewListener(ctx context.Context, channel string, callback func(id string)) {

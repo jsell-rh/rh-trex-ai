@@ -24,6 +24,7 @@ type ApplicationConfig struct {
 	HealthCheck *HealthCheckConfig `json:"health_check"`
 	Database    *DatabaseConfig    `json:"database"`
 	APIClient   *APIClientConfig   `json:"api_client"`
+	Logging     *LoggingConfig     `json:"logging"`
 }
 
 func NewApplicationConfig() *ApplicationConfig {
@@ -36,6 +37,7 @@ func NewApplicationConfig() *ApplicationConfig {
 		HealthCheck: NewHealthCheckConfig(),
 		Database:    NewDatabaseConfig(),
 		APIClient:   NewAPIClientConfig(),
+		Logging:     NewLoggingConfig(),
 	}
 }
 
@@ -53,6 +55,7 @@ func (c *ApplicationConfig) AddFlags(flagset *pflag.FlagSet) {
 	c.HealthCheck.AddFlags(flagset)
 	c.Database.AddFlags(flagset)
 	c.APIClient.AddFlags(flagset)
+	c.Logging.AddFlags(flagset)
 }
 
 func (c *ApplicationConfig) ReadFiles() []string {
