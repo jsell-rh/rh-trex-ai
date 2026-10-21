@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -56,7 +55,7 @@ func RecoveryUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				glog.Errorf("gRPC panic in %s: %v\n%s", info.FullMethod, r, debug.Stack())
+				logger.NewLogger(ctx).Error(fmt.Sprintf("gRPC panic in %s: %v\n%s", info.FullMethod, r, debug.Stack()))
 				err = status.Error(codes.Internal, "internal server error")
 			}
 		}()
@@ -101,7 +100,7 @@ func TransactionUnaryInterceptor(sessionFactory db.SessionFactory) grpc.UnarySer
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		ctx, txErr := db.NewContext(ctx, sessionFactory)
 		if txErr != nil {
-			glog.Errorf("Failed to create DB transaction for gRPC call %s: %v", info.FullMethod, txErr)
+			logger.NewLogger(ctx).Error(fmt.Sprintf("Failed to create DB transaction for gRPC call %s: %v", info.FullMethod, txErr))
 			return nil, status.Error(codes.Internal, "internal database error")
 		}
 		defer func() {
@@ -147,7 +146,7 @@ func RecoveryStreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				glog.Errorf("gRPC stream panic in %s: %v\n%s", info.FullMethod, r, debug.Stack())
+				logger.NewLogger(ss.Context()).Error(fmt.Sprintf("gRPC stream panic in %s: %v\n%s", info.FullMethod, r, debug.Stack()))
 				err = status.Error(codes.Internal, "internal server error")
 			}
 		}()

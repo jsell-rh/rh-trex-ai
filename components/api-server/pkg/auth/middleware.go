@@ -16,6 +16,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/golang/glog"
+
+	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 // JWTHandler provides JWT authentication without OCM dependencies
@@ -101,15 +103,15 @@ func (j *JWTHandler) Build() (func(http.Handler) http.Handler, error) {
 			// Extract JWT token from Authorization header
 			token, err := j.extractToken(r)
 			if err != nil {
-				glog.Warningf("JWT extraction failed: %v", err)
+				logger.NewLogger(r.Context()).Warning(fmt.Sprintf("JWT extraction failed: %v", err))
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 
 			// Validate and parse the JWT token
-			parsedToken, err := j.validateToken(token)
+			parsedToken, err := j.validateToken(r.Context(), token)
 			if err != nil {
-				glog.Warningf("JWT validation failed: %v", err)
+				logger.NewLogger(r.Context()).Warning(fmt.Sprintf("JWT validation failed: %v", err))
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -142,7 +144,7 @@ func (j *JWTHandler) extractToken(r *http.Request) (string, error) {
 }
 
 // validateToken parses and validates the JWT token
-func (j *JWTHandler) validateToken(tokenString string) (*jwt.Token, error) {
+func (j *JWTHandler) validateToken(ctx context.Context, tokenString string) (*jwt.Token, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Validate the signing method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
@@ -164,11 +166,11 @@ func (j *JWTHandler) validateToken(tokenString string) (*jwt.Token, error) {
 			return publicKey, nil
 		}
 
-		// Unknown kid — attempt a one-shot refresh if outside cooldown window
+		// Unknown kid: attempt a one-shot refresh if outside cooldown window
 		if time.Since(j.lastKidRefresh) >= j.kidRefreshWait {
 			j.lastKidRefresh = time.Now()
 			if refreshErr := j.loadKeys(); refreshErr != nil {
-				glog.Warningf("JWT key refresh on unknown kid failed: %v", refreshErr)
+				logger.NewLogger(ctx).Warning(fmt.Sprintf("JWT key refresh on unknown kid failed: %v", refreshErr))
 			} else {
 				j.keysMutex.RLock()
 				publicKey, exists = j.publicKeys[kid]

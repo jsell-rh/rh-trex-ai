@@ -52,6 +52,9 @@ func (f *Default) Init(config *config.DatabaseConfig) {
 		conf := &gorm.Config{
 			PrepareStmt:          false,
 			FullSaveAssociations: false,
+			// Send SQL logs through slog with the statement context, without
+			// color codes. New() silences sessions unless DB debug is on.
+			Logger: trexlogger.NewGormLogger(),
 		}
 		g2, err = gorm.Open(postgres.New(postgres.Config{
 			DSN:                  dsn,

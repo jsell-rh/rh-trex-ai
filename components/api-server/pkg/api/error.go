@@ -1,13 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 
-	"github.com/golang/glog"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/errors"
+	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 // SendNotFound sends a 404 response with some details about the non existing resource.
@@ -39,7 +40,7 @@ func SendNotFound(w http.ResponseWriter, r *http.Request) {
 	_, err = w.Write(data)
 	if err != nil {
 		err = fmt.Errorf("can't send response body for request '%s'", r.URL.Path)
-		glog.Error(err)
+		logger.NewLogger(r.Context()).Error(err.Error())
 
 		return
 	}
@@ -61,7 +62,7 @@ func SendUnauthorized(w http.ResponseWriter, r *http.Request, message string) {
 	_, err = w.Write(data)
 	if err != nil {
 		err = fmt.Errorf("can't send response body for request '%s'", r.URL.Path)
-		glog.Error(err)
+		logger.NewLogger(r.Context()).Error(err.Error())
 
 		return
 	}
@@ -77,7 +78,7 @@ func SendPanic(w http.ResponseWriter, r *http.Request) {
 			r.URL.Path,
 			err.Error(),
 		)
-		glog.Error(err)
+		logger.NewLogger(r.Context()).Error(err.Error())
 
 	}
 }
@@ -105,7 +106,7 @@ func getPanicBody() []byte {
 				"can't create the panic error body: %s",
 				err.Error(),
 			)
-			glog.Error(err)
+			logger.NewLogger(context.Background()).Error(err.Error())
 
 			panic(err)
 		}

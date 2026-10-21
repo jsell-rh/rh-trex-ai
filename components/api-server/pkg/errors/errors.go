@@ -1,13 +1,13 @@
 package errors
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 
-	"github.com/golang/glog"
-
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/api/openapi"
+	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 var (
@@ -113,7 +113,7 @@ func New(code ServiceErrorCode, reason string, values ...interface{}) *ServiceEr
 	var err *ServiceError
 	exists, err := Find(code)
 	if !exists {
-		glog.Errorf("Undefined error code used: %d", code)
+		logger.NewLogger(context.Background()).Error(fmt.Sprintf("Undefined error code used: %d", code))
 		err = &ServiceError{ErrorGeneral, "Unspecified error", 500}
 	}
 

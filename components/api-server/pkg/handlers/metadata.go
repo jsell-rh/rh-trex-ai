@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/golang/glog"
 	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/api"
+	"github.com/openshift-online/rh-trex-ai/components/api-server/pkg/logger"
 )
 
 var metadataID = "rh-trex-ai"
@@ -58,7 +58,7 @@ func (h MetadataHandler) Get(w http.ResponseWriter, r *http.Request) {
 	_, err = w.Write(data)
 	if err != nil {
 		err = fmt.Errorf("can't send response body for request '%s'", r.URL.Path)
-		glog.Error(err)
+		logger.NewLogger(r.Context()).Error(err.Error())
 		return
 	}
 }

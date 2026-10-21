@@ -1,0 +1,11 @@
+I [opid=op-123][accountID=acct-9][tx_id=42] gRPC /x.y/Z OK 29ms|
+I [opid=op-123][accountID=acct-9][tx_id=42]  plain info |
+W [opid=op-123][accountID=acct-9][tx_id=42]  plain warning |
+E [opid=op-123][accountID=acct-9][tx_id=42]  plain error |
+E [opid=op-123][accountID=acct-9][tx_id=42]  with extra error=boom|
+I [opid=op-123][accountID=acct-9][tx_id=42] verbose 2 shown|
+I [opid=op-456] op only f|
+I [opid=op-456]  op only |
+I  no context 1|
+I   no context |
+W   no context warning |

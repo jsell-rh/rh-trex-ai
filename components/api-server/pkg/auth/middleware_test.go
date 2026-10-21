@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
@@ -472,7 +473,7 @@ func TestJWTHandler_ValidateToken_MultiURL(t *testing.T) {
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
 
-	parsed1, err := handler.validateToken(token1)
+	parsed1, err := handler.validateToken(context.Background(), token1)
 	if err != nil {
 		t.Fatalf("validateToken for issuer-1: %v", err)
 	}
@@ -480,7 +481,7 @@ func TestJWTHandler_ValidateToken_MultiURL(t *testing.T) {
 		t.Error("expected valid token from issuer 1")
 	}
 
-	parsed2, err := handler.validateToken(token2)
+	parsed2, err := handler.validateToken(context.Background(), token2)
 	if err != nil {
 		t.Fatalf("validateToken for issuer-2: %v", err)
 	}
@@ -541,7 +542,7 @@ func TestJWTHandler_ValidateToken_ExpectedClaims(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			token := testSignedToken(t, kid, key, tt.claims)
-			_, err := handler.validateToken(token)
+			_, err := handler.validateToken(context.Background(), token)
 			if tt.expectError && err == nil {
 				t.Fatal("validateToken() expected an error")
 			}
@@ -576,7 +577,7 @@ func TestJWTHandler_ValidateToken_FileAndURL(t *testing.T) {
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
 
-	parsed1, err := handler.validateToken(fileToken)
+	parsed1, err := handler.validateToken(context.Background(), fileToken)
 	if err != nil {
 		t.Fatalf("validateToken for file issuer: %v", err)
 	}
@@ -584,7 +585,7 @@ func TestJWTHandler_ValidateToken_FileAndURL(t *testing.T) {
 		t.Error("expected valid token from file issuer")
 	}
 
-	parsed2, err := handler.validateToken(urlToken)
+	parsed2, err := handler.validateToken(context.Background(), urlToken)
 	if err != nil {
 		t.Fatalf("validateToken for url issuer: %v", err)
 	}
@@ -614,7 +615,7 @@ func TestJWTHandler_OnDemandRefresh_LoadsAllSources(t *testing.T) {
 		"sub": "user",
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
-	parsed, err := handler.validateToken(fileToken)
+	parsed, err := handler.validateToken(context.Background(), fileToken)
 	if err != nil {
 		t.Fatalf("validateToken should trigger on-demand refresh and find file key: %v", err)
 	}
